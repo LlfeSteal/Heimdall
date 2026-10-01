@@ -54,6 +54,8 @@ export interface Report {
 
 export interface IterationReport extends Iteration {
   report: Report | null
+  /** GitLab's verbatim reason when it refused to build this iteration's report (TimeboxReport.error), else null. */
+  reportError: string | null
 }
 
 export interface ApiError {

@@ -1,0 +1,11 @@
+.git
+.gitignore
+bin/
+*.test
+*.out
+coverage*
+.env
+.env.*
+Dockerfile
+.dockerignore
+README.md

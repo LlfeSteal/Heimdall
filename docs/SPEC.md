@@ -1227,7 +1227,9 @@ So for §15.3: `8.8 %` → **good**, `+2.5 pts` → **caution**, `50 %` → **ca
   - `GET /api/iterations?group=<fullPath>` → `Iteration[]` newest-first, **unfiltered** (upcoming included):
     `{ id, iid, title, startDate, dueDate, state }`
   - `GET /api/reports?group=<fullPath>[&refresh=1]` → `IterationReport[]` (≤ 50, newest-first):
-    `{ id, iid, title, state, startDate, dueDate, report: Report | null }`,
+    `{ id, iid, title, state, startDate, dueDate, report: Report | null, reportError: string | null }`
+    (`reportError` = GitLab's verbatim `TimeboxReport.error.message`; the chart shows it as the region error;
+    the §4.4 data check treats a group whose iterations have no series but ≥1 reportError as a FAILED read ⇒ kept),
     `Report = { series: SeriesPoint[], totals: { committed: Total, delivered: Total, inProgress: Total } }`,
     `SeriesPoint = { date, committed, delivered, remaining }`, `Total = { weight, count }`
   - Errors: non-2xx with `{ error: "<verbatim message>" }`.

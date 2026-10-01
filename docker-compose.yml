@@ -1,0 +1,35 @@
+# Heimdall: Go API behind an nginx-served SPA.
+#   cp .env.example .env   # then edit, or keep GITLAB_MOCK=1 for fixture data
+#   docker compose up --build    ->  http://localhost/
+name: heimdall
+
+services:
+  backend:
+    build: ./backend
+    image: heimdall-backend
+    restart: unless-stopped
+    environment:
+      GITLAB_URL: ${GITLAB_URL:-}
+      GITLAB_TOKEN: ${GITLAB_TOKEN:-}
+      ROOT_GROUP: ${ROOT_GROUP:-org/delivery}
+      GROUP_TERM: ${GROUP_TERM:-ART}
+      GITLAB_MOCK: ${GITLAB_MOCK:-0}
+      GIN_MODE: release
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/api/health"]
+      interval: 15s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+
+  frontend:
+    build: ./frontend
+    image: heimdall-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
