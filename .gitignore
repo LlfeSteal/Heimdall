@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+backend/bin/
+.env
+test-results/
+playwright-report/
