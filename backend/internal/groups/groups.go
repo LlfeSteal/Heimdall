@@ -31,15 +31,20 @@ const MaxInFlight = 8
 // a direct sub-group, 2 for a sub-group of that, …, and -1 when fullPath is
 // not root and not under root. "Under" means fullPath has the prefix
 // root + "/" (so `org/delivery-x/a` is NOT under `org/delivery`).
+//
+// GitLab resolves paths case-insensitively but answers with canonical case,
+// so a ROOT_GROUP typed in another case must still match: the prefix is
+// compared with strings.EqualFold (GitLab paths are ASCII, so byte offsets
+// are safe).
 func Depth(root, fullPath string) int {
-	if fullPath == root {
+	if strings.EqualFold(fullPath, root) {
 		return 0
 	}
-	rest, under := strings.CutPrefix(fullPath, root+"/")
-	if !under {
+	n := len(root)
+	if len(fullPath) <= n+1 || fullPath[n] != '/' || !strings.EqualFold(fullPath[:n], root) {
 		return -1
 	}
-	return strings.Count(rest, "/") + 1
+	return strings.Count(fullPath[n+1:], "/") + 1
 }
 
 // LastSegment returns the part after the last "/" (the whole string if none).
@@ -100,6 +105,17 @@ func HasCurve(reports []api.IterationReport) bool {
 	return false
 }
 
+// HasReportError reports whether ANY iteration's report was refused by
+// GitLab (TimeboxReport.error).
+func HasReportError(reports []api.IterationReport) bool {
+	for _, r := range reports {
+		if r.ReportError != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // ReadFunc is the per-group report read — in production the SAME cached read
 // that serves /api/reports (§4.4 "the very same read the chart later uses").
 type ReadFunc func(ctx context.Context, fullPath string) ([]api.IterationReport, error)
@@ -108,9 +124,10 @@ type ReadFunc func(ctx context.Context, fullPath string) ([]api.IterationReport,
 // (clamped to 1..MaxInFlight) reads running at any instant, and returns
 // passed[i] for paths[i] (INPUT order, independent of completion order):
 //
-//	read error            → true  (fail OPEN)
-//	HasCurve(reports)     → true
-//	otherwise             → false
+//	read error or panic     → true  (fail OPEN)
+//	HasCurve(reports)       → true
+//	HasReportError(reports) → true  (GitLab refused a report: a failed read)
+//	otherwise               → false
 //
 // Never returns nil; len(result) == len(paths).
 func CheckData(ctx context.Context, paths []string, maxInFlight int, read ReadFunc) []bool {
@@ -122,12 +139,21 @@ func CheckData(ctx context.Context, paths []string, maxInFlight int, read ReadFu
 		wg.Add(1)
 		go func(i int, p string) {
 			defer func() { <-slots; wg.Done() }()
-			reports, err := read(ctx, p)
-			passed[i] = err != nil || HasCurve(reports)
+			passed[i] = check(ctx, p, read)
 		}(i, p)
 	}
 	wg.Wait()
 	return passed
+}
+
+func check(ctx context.Context, path string, read ReadFunc) (passed bool) {
+	defer func() {
+		if recover() != nil {
+			passed = true // a read that blew up is a failed read: fail open
+		}
+	}()
+	reports, err := read(ctx, path)
+	return err != nil || HasCurve(reports) || HasReportError(reports)
 }
 
 // BuildCards folds candidates (with passed[i] for candidates[i]) into cards

@@ -13,7 +13,8 @@
 //	delivered  = stats.complete   {weight, count}
 //	inProgress = stats.incomplete {weight, count}
 //
-// A `report: null` stays nil (JSON null). A non-null report whose
+// A `report: null` stays nil (JSON null). `report.error` becomes ReportError:
+// GitLab's message verbatim (its code when the message is empty), else nil. A non-null report whose
 // burnupTimeSeries is null/absent gets an EMPTY, non-nil series (JSON []).
 // Series points keep GitLab's order and dates verbatim; nothing is added,
 // removed or re-sorted here (the §7.2 repairs are a frontend concern).
@@ -28,7 +29,11 @@ import (
 
 // NormalizeOne converts one iteration + report.
 func NormalizeOne(in gitlab.IterationReport) api.IterationReport {
-	return api.IterationReport{Iteration: Iteration(in.Iteration), Report: report(in.Report)}
+	return api.IterationReport{
+		Iteration:   Iteration(in.Iteration),
+		Report:      report(in.Report),
+		ReportError: reportError(in.Report),
+	}
 }
 
 // Normalize converts a slice, preserving order. Never returns nil (empty
@@ -69,6 +74,17 @@ func report(in *gitlab.Report) *api.Report {
 		})
 	}
 	return &api.Report{Series: series, Totals: totals(in.Stats)}
+}
+
+func reportError(in *gitlab.Report) *string {
+	if in == nil || in.Error == nil {
+		return nil
+	}
+	msg := in.Error.Message
+	if msg == "" {
+		msg = in.Error.Code
+	}
+	return &msg
 }
 
 func totals(st *gitlab.ReportStats) api.Totals {

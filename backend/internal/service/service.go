@@ -24,6 +24,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"heimdall/internal/api"
@@ -36,7 +37,7 @@ import (
 
 // Options configures a Service. Zero values select the defaults.
 type Options struct {
-	RootGroup     string           // A.2 ROOT_GROUP (required)
+	RootGroup     string           // A.2 ROOT_GROUP (required; surrounding "/" ignored, any case)
 	Now           func() time.Time // cache clock; nil → time.Now
 	TTL           time.Duration    // 0 → cache.DefaultTTL (5 min)
 	CacheCapacity int              // per cache; 0 → cache.DefaultCapacity
@@ -55,7 +56,7 @@ type Service struct {
 func New(client gitlab.Client, opts Options) *Service {
 	return &Service{
 		client:      client,
-		root:        opts.RootGroup,
+		root:        strings.Trim(opts.RootGroup, "/"),
 		descendants: cache.New[[]gitlab.Group](opts.TTL, opts.CacheCapacity, opts.Now),
 		iterations:  cache.New[[]api.Iteration](opts.TTL, opts.CacheCapacity, opts.Now),
 		reports:     cache.New[[]api.IterationReport](opts.TTL, opts.CacheCapacity, opts.Now),

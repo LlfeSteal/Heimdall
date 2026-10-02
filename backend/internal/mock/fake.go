@@ -8,10 +8,13 @@ package mock
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"heimdall/internal/gitlab"
+	"heimdall/internal/iterations"
 )
 
 // Method names accepted by Calls / SetError.
@@ -23,7 +26,10 @@ const (
 
 // Fake is an in-memory GitLab. Behaviour mirrors the real GraphQL API:
 //   - unknown group → empty slice, nil error (`group: null`);
-//   - Reports returns at most gitlab.MaxReportIterations items, in stored order;
+//   - group paths are matched case-insensitively (stored data, SetError);
+//     call counters are kept per path exactly as called;
+//   - Reports returns the newest gitlab.MaxReportIterations items by the §5.1
+//     rule (like *gitlab.HTTPClient), in stored order;
 //   - Iterations returns all stored iterations (without reports), stored order;
 //   - DescendantGroups returns the stored list verbatim (no filtering).
 //
@@ -59,14 +65,14 @@ var _ gitlab.Client = (*Fake)(nil)
 func (f *Fake) SetDescendants(root string, gs []gitlab.Group) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.descendants[root] = append([]gitlab.Group(nil), gs...)
+	f.descendants[pathKey(root)] = append([]gitlab.Group(nil), gs...)
 }
 
 // SetIterations sets the iterations (with reports) of a group.
 func (f *Fake) SetIterations(group string, its []gitlab.IterationReport) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.iterations[group] = append([]gitlab.IterationReport(nil), its...)
+	f.iterations[pathKey(group)] = append([]gitlab.IterationReport(nil), its...)
 }
 
 // SetError makes method (or every method when method == "") fail for path
@@ -74,7 +80,7 @@ func (f *Fake) SetIterations(group string, its []gitlab.IterationReport) {
 func (f *Fake) SetError(method, path string, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	k := method + "\x00" + path
+	k := method + "\x00" + pathKey(path)
 	if err == nil {
 		delete(f.errs, k)
 		return
@@ -148,9 +154,9 @@ func (f *Fake) enter(ctx context.Context, method, path string) (func(), error) {
 		f.maxInFlight[method] = f.inFlight[method]
 	}
 	delay, gate := f.delay, f.gate
-	err := f.errs[method+"\x00"+path]
+	err := f.errs[method+"\x00"+pathKey(path)]
 	if err == nil {
-		err = f.errs["\x00"+path]
+		err = f.errs["\x00"+pathKey(path)]
 	}
 	f.mu.Unlock()
 	leave := func() {
@@ -184,7 +190,7 @@ func (f *Fake) DescendantGroups(ctx context.Context, root string) ([]gitlab.Grou
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]gitlab.Group{}, f.descendants[root]...), nil
+	return append([]gitlab.Group{}, f.descendants[pathKey(root)]...), nil
 }
 
 // Iterations implements gitlab.Client.
@@ -196,7 +202,7 @@ func (f *Fake) Iterations(ctx context.Context, group string) ([]gitlab.Iteration
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	src := f.iterations[group]
+	src := f.iterations[pathKey(group)]
 	out := make([]gitlab.Iteration, 0, len(src))
 	for _, it := range src {
 		out = append(out, it.Iteration)
@@ -213,9 +219,30 @@ func (f *Fake) Reports(ctx context.Context, group string) ([]gitlab.IterationRep
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	src := f.iterations[group]
-	if len(src) > gitlab.MaxReportIterations {
-		src = src[:gitlab.MaxReportIterations]
-	}
-	return append([]gitlab.IterationReport{}, src...), nil
+	return newestInStoredOrder(f.iterations[pathKey(group)], gitlab.MaxReportIterations), nil
 }
+
+// newestInStoredOrder keeps the n newest of src (§5.1 rule) without
+// reordering them.
+func newestInStoredOrder(src []gitlab.IterationReport, n int) []gitlab.IterationReport {
+	if len(src) <= n {
+		return append([]gitlab.IterationReport{}, src...)
+	}
+	idx := make([]int, len(src))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.SliceStable(idx, func(a, b int) bool {
+		x, y := src[idx[a]], src[idx[b]]
+		return iterations.Newer(x.StartDate, x.IID, y.StartDate, y.IID)
+	})
+	keep := idx[:n]
+	sort.Ints(keep)
+	out := make([]gitlab.IterationReport, 0, n)
+	for _, i := range keep {
+		out = append(out, src[i])
+	}
+	return out
+}
+
+func pathKey(path string) string { return strings.ToLower(path) }

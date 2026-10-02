@@ -257,7 +257,10 @@ func TestReports_Contract(t *testing.T) {
 	}
 	sawNull, sawSeries, sawEmpty := false, false, false
 	for _, r := range raw {
-		wantKeys(t, "IterationReport", r, "id", "iid", "title", "state", "startDate", "dueDate", "report")
+		wantKeys(t, "IterationReport", r, "id", "iid", "title", "state", "startDate", "dueDate", "report", "reportError")
+		if r["reportError"] != nil {
+			t.Errorf("alpha iid %v reportError = %v, want null", r["iid"], r["reportError"])
+		}
 		rep, isObj := r["report"].(map[string]any)
 		if r["report"] == nil {
 			sawNull = true

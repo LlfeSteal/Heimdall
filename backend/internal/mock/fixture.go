@@ -23,6 +23,10 @@ const (
 	PathDelta      = "org/delivery/delta"            // every read fails → card (fail open)
 	PathZeta       = "org/other/zeta"                // data, outside root → never offered
 
+	// Team1ReportError is the verbatim TimeboxReport.error message of
+	// alpha/team-1 iid 1 (GitLab refused to build that report).
+	Team1ReportError = "Burnup chart could not be generated due to too many events"
+
 	// DeltaError is the verbatim message every read of PathDelta fails with.
 	DeltaError = "The resource that you are attempting to access does not exist or you don't have permission to perform this action"
 )
@@ -85,7 +89,8 @@ func FixtureDescendants() []gitlab.Group {
 //	iid 8  upcoming  start today+9    report with empty series
 //
 // Every series has scope added on day 3 and removed on day 8, and stalls
-// (no progress) on some days. alpha/team-2 and beta have the same calendar
+// (no progress) on some days. alpha/team-1 iid 1 carries a report error
+// (Team1ReportError, null series). alpha/team-2 and beta have the same calendar
 // but every series is empty (team-2 iid 1: report null). gamma has no
 // iterations. Every read of delta fails with DeltaError.
 func Fixture(today time.Time) *Fake {
@@ -161,6 +166,8 @@ func genIterations(today time.Time, path string, seed int, scope0 float64, mode 
 		switch {
 		case p.iid == 1 && (path == PathAlpha || path == PathAlphaTeam2):
 			ir.Report = nil // `report: null` must be tolerated
+		case p.iid == 1 && path == PathAlphaTeam1:
+			ir.Report = &gitlab.Report{Error: &gitlab.ReportError{Code: "TOO_MANY_EVENTS", Message: Team1ReportError}}
 		case mode == "empty" || p.state == "upcoming":
 			sc := scope0 + float64(p.iid%3)
 			ir.Report = &gitlab.Report{

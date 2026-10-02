@@ -9,10 +9,22 @@ package gitlab
 
 import "context"
 
-// MaxReportIterations is the number of iterations requested by the single
-// per-group report read (SPEC §5.2, §6: "up to 50"). The GraphQL query MUST
-// request `iterations(first: 50, ...)`.
+// MaxReportIterations is the number of iterations the per-group report read
+// returns (SPEC §5.2, §6: "up to 50"): the newest ones by the §5.1 rule.
 const MaxReportIterations = 50
+
+// ReportBatchSize is the most iteration reports requested in one GraphQL
+// request. GitLab gives `Iteration.report` a complexity of 175 against a
+// per-query maximum of 250 for authenticated users, so one report per request
+// is all that reliably fits.
+const ReportBatchSize = 1
+
+// ReportConcurrency is the most report requests one report read keeps in
+// flight.
+const ReportConcurrency = 4
+
+// IterationsPageSize is the page size of the lightweight iteration list.
+const IterationsPageSize = 100
 
 // DescendantsPageSize is the page size used while paginating descendantGroups
 // (GitLab's maximum). Pagination continues until hasNextPage=false (A.3 #1,
@@ -60,10 +72,18 @@ type ReportStats struct {
 	Incomplete *CountWeight `json:"incomplete"`
 }
 
+// ReportError is `report.error`: GitLab's reason for not building a report
+// (e.g. code TOO_MANY_EVENTS). The series is then null.
+type ReportError struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
 // Report is `iteration.report(fullPath: $fullPath)`.
 type Report struct {
 	BurnupTimeSeries []BurnupPoint `json:"burnupTimeSeries"`
 	Stats            *ReportStats  `json:"stats"`
+	Error            *ReportError  `json:"error"`
 }
 
 // IterationReport is an iteration node that also carries its report.
@@ -92,8 +112,10 @@ type Client interface {
 	// A missing group (`group: null`) → empty slice, nil error (§5.1, §15.2).
 	Iterations(ctx context.Context, groupFullPath string) ([]Iteration, error)
 
-	// Reports returns up to MaxReportIterations iterations of the group, each
-	// with its report, from ONE request (§5.2). `report(fullPath:)` is passed
-	// the same group full path. A missing group → empty slice, nil error.
+	// Reports is the ONE logical report read of a group (§5.2): its newest
+	// MaxReportIterations iterations by the §5.1 rule, each with its report
+	// scoped by `report(fullPath:)` to the same group. *HTTPClient performs it
+	// as several small GraphQL requests (see HTTPClient.Reports); any failed
+	// request fails the whole read. A missing group → empty slice, nil error.
 	Reports(ctx context.Context, groupFullPath string) ([]IterationReport, error)
 }

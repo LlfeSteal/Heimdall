@@ -3,6 +3,7 @@ package gitlab_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -320,17 +321,59 @@ func TestHTTPClient_Iterations_DecodesNodesInOneRequest(t *testing.T) {
 	}
 }
 
-const reportsBody = `{"data":{"group":{"iterations":{"nodes":[
- {"id":"gid://gitlab/Iteration/21","iid":"7","title":"Sprint 7","startDate":"2026-09-26","dueDate":"2026-10-09","state":"current",
-  "report":{"burnupTimeSeries":[
+const reportsListBody = `{"data":{"group":{"iterations":{"nodes":[
+ {"id":"gid://gitlab/Iteration/22","iid":"6","title":"Sprint 6","startDate":"2026-09-12","dueDate":"2026-09-25","state":"closed"},
+ {"id":"gid://gitlab/Iteration/21","iid":"7","title":"Sprint 7","startDate":"2026-09-26","dueDate":"2026-10-09","state":"current"}],
+ "pageInfo":{"hasNextPage":false,"endCursor":"END"}}}}}`
+
+const report21 = `{"burnupTimeSeries":[
     {"date":"2026-09-26","scopeCount":10,"scopeWeight":30,"completedCount":0,"completedWeight":0},
     {"date":"2026-09-27","scopeCount":11,"scopeWeight":null,"completedCount":2,"completedWeight":5}],
-   "stats":{"total":{"count":11,"weight":33},"complete":{"count":2,"weight":5},"incomplete":{"count":9,"weight":28}}}},
- {"id":"gid://gitlab/Iteration/22","iid":"6","title":"Sprint 6","startDate":"2026-09-12","dueDate":"2026-09-25","state":"closed","report":null}]}}}}`
+   "stats":{"total":{"count":11,"weight":33},"complete":{"count":2,"weight":5},"incomplete":{"count":9,"weight":28}},
+   "error":null}`
 
-// §5.2: one read per group, up to 50 iterations, report(fullPath:) scoped to the group.
-func TestHTTPClient_Reports_OneRequestFirst50(t *testing.T) {
-	f, c := newServer(t, func(r gqlRequest) (int, string) { return 200, reportsBody })
+var reportCall = regexp.MustCompile(`report\s*\(\s*fullPath:\s*\$fullPath\s*\)`)
+
+// isReportRequest tells the per-iteration report requests from list requests.
+func isReportRequest(r gqlRequest) bool { return strings.Contains(r.Query, "burnupTimeSeries") }
+
+// batchIDs returns the iteration ids a report request asks for ($id0, $id1, …).
+func batchIDs(r gqlRequest) []string {
+	var ids []string
+	for k := 0; ; k++ {
+		id := varString(r, fmt.Sprintf("id%d", k))
+		if id == "" {
+			return ids
+		}
+		ids = append(ids, id)
+	}
+}
+
+// batchResponse answers a report request with report(id) for each alias.
+func batchResponse(r gqlRequest, report func(id string) string) string {
+	var parts []string
+	for k, id := range batchIDs(r) {
+		parts = append(parts, fmt.Sprintf(`"i%d":{"id":%q,"report":%s}`, k, id, report(id)))
+	}
+	return `{"data":{` + strings.Join(parts, ",") + `}}`
+}
+
+// §5.2 (one logical read per group, ≤ 50 iterations) performed as: the
+// lightweight list, then small report requests scoped with report(fullPath:).
+// Replaces the round-0 single-request test: one query asking for 50 reports
+// exceeds GitLab's query complexity limit (conformance round 1, G10).
+func TestHTTPClient_Reports_ListThenBatchedReports(t *testing.T) {
+	f, c := newServer(t, func(r gqlRequest) (int, string) {
+		if !isReportRequest(r) {
+			return 200, reportsListBody
+		}
+		return 200, batchResponse(r, func(id string) string {
+			if id == "gid://gitlab/Iteration/21" {
+				return report21
+			}
+			return "null"
+		})
+	})
 	got, err := c.Reports(context.Background(), "org/delivery/alpha")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -339,7 +382,7 @@ func TestHTTPClient_Reports_OneRequestFirst50(t *testing.T) {
 		t.Fatalf("got %d, want 2", len(got))
 	}
 	if got[0].IID != "7" || got[0].Report == nil || len(got[0].Report.BurnupTimeSeries) != 2 {
-		t.Fatalf("report[0] decoded wrong: %+v", got[0])
+		t.Fatalf("report[0] decoded wrong (want newest first, iid 7 with 2 points): %+v", got[0])
 	}
 	p1 := got[0].Report.BurnupTimeSeries[1]
 	if p1.Date != "2026-09-27" || p1.ScopeWeight != nil || p1.CompletedWeight == nil || *p1.CompletedWeight != 5 {
@@ -349,34 +392,43 @@ func TestHTTPClient_Reports_OneRequestFirst50(t *testing.T) {
 	if st == nil || st.Total == nil || *st.Total.Weight != 33 || *st.Complete.Count != 2 || *st.Incomplete.Weight != 28 {
 		t.Errorf("stats decoded wrong: %+v", st)
 	}
-	if got[1].Report != nil {
-		t.Errorf("report: null must decode to nil Report, got %+v", got[1].Report)
+	if got[0].Report.Error != nil {
+		t.Errorf("error: null must decode to nil, got %+v", got[0].Report.Error)
 	}
+	if got[1].IID != "6" || got[1].Report != nil {
+		t.Errorf("report: null must decode to nil Report, got %+v", got[1])
+	}
+
 	rs := f.reqs()
-	if len(rs) != 1 {
-		t.Fatalf("Reports made %d requests, want exactly 1 (§5.2)", len(rs))
+	wantReqs := 1 + (2+gitlab.ReportBatchSize-1)/gitlab.ReportBatchSize
+	if len(rs) != wantReqs {
+		t.Fatalf("Reports made %d requests, want %d (1 list page + report batches)", len(rs), wantReqs)
 	}
-	r := rs[0]
-	if varString(r, "fullPath") != "org/delivery/alpha" {
-		t.Errorf("variable fullPath = %q, want org/delivery/alpha", varString(r, "fullPath"))
+	list := rs[0]
+	if isReportRequest(list) || !regexp.MustCompile(`includeAncestors:\s*true`).MatchString(list.Query) {
+		t.Errorf("first request must be the lightweight list with includeAncestors: true: %s", list.Query)
 	}
-	if !strings.Contains(r.Query, "burnupTimeSeries") || !strings.Contains(r.Query, "stats") {
-		t.Errorf("Reports query must request burnupTimeSeries and stats: %s", r.Query)
+	if varString(list, "fullPath") != "org/delivery/alpha" {
+		t.Errorf("list variable fullPath = %q", varString(list, "fullPath"))
 	}
-	if !regexp.MustCompile(`report\s*\(\s*fullPath:\s*\$fullPath\s*\)`).MatchString(r.Query) {
-		t.Errorf("Reports query must scope report(fullPath: $fullPath): %s", r.Query)
-	}
-	if !regexp.MustCompile(`includeAncestors:\s*true`).MatchString(r.Query) {
-		t.Errorf("Reports query must use includeAncestors: true: %s", r.Query)
-	}
-	first50 := regexp.MustCompile(`first:\s*50\b`).MatchString(r.Query)
-	if v, ok := r.Variables["first"].(float64); ok && v == 50 {
-		first50 = true
-	}
-	if !first50 {
-		t.Errorf("Reports must request first: 50 iterations (§5.2/§6); query=%s vars=%v", r.Query, r.Variables)
+	for _, r := range rs[1:] {
+		if !isReportRequest(r) || !strings.Contains(r.Query, "stats") {
+			t.Errorf("report request must ask for burnupTimeSeries and stats: %s", r.Query)
+		}
+		if !regexp.MustCompile(`error\s*\{\s*code\s+message\s*\}`).MatchString(r.Query) {
+			t.Errorf("report request must select error { code message }: %s", r.Query)
+		}
+		if n := len(reportCall.FindAllString(r.Query, -1)); n < 1 || n > gitlab.ReportBatchSize {
+			t.Errorf("report request asks for %d reports, want 1..%d: %s", n, gitlab.ReportBatchSize, r.Query)
+		}
+		if varString(r, "fullPath") != "org/delivery/alpha" {
+			t.Errorf("report variable fullPath = %q, want org/delivery/alpha", varString(r, "fullPath"))
+		}
 	}
 	if gitlab.MaxReportIterations != 50 {
 		t.Errorf("MaxReportIterations = %d, want 50", gitlab.MaxReportIterations)
+	}
+	if gitlab.ReportBatchSize < 1 || gitlab.ReportBatchSize > 5 || gitlab.ReportConcurrency < 1 || gitlab.ReportConcurrency > 4 {
+		t.Errorf("ReportBatchSize=%d ReportConcurrency=%d, want 1..5 and 1..4", gitlab.ReportBatchSize, gitlab.ReportConcurrency)
 	}
 }

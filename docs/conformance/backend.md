@@ -341,3 +341,33 @@ mismatched-case root.
 
 MATCH 55 · MISMATCH 0 · MISSING 1 (row 18) · AMBIGUOUS 3 (rows 7, 22, 34; 22 and 34 are covered by analyst
 decisions). Section B: 8 OK, 6 RISK (G3, G9, G10, G12, G13, G14).
+
+---
+
+## Round 1 fixes (builder)
+
+Verify: `cd backend && GOFLAGS=-buildvcs=false go vet ./... && go test -race -count=1 ./...` → 161 passed
+(115 tests + 46 subtests), 10 packages, 0 failed; `gofmt -l .` clean. Mock smoke test with
+`ROOT_GROUP=Org/Delivery/` → `alpha[team-1]`, `beta[x]`, `delta[]`; `/api/reports?group=org/delivery/alpha/team-1`
+→ 9 items newest first, iid 1 `reportError` = "Burnup chart could not be generated due to too many events",
+the others `null`.
+
+| Finding | Fix | Pinned by (new tests) |
+|---|---|---|
+| Contract: `reportError` | `api.IterationReport.ReportError *string` `json:"reportError"` (always present, `null` when none). `gitlab.Report.Error {code message}`; `reports.NormalizeOne` copies the message verbatim (the code if the message is empty). A refused report keeps its normalised `report` (empty series). | `reports.TestNormalizeOne_ReportError`, `api.TestReports_ReportErrorOverHTTP`, `service.TestReports_FixtureReportErrorServed`; `api.TestReports_Contract` key list extended |
+| Row 18 / G9 | Report requests select `error { code message }`. `groups.HasReportError`; `CheckData` keeps a group when `err ∥ HasCurve ∥ HasReportError` (refused report = failed read ⇒ fail open). | `groups.TestHasReportError`, `groups.TestCheckData_ReportErrorIsAFailedRead`, `service.TestGroups_RefusedReportKeepsGroup`, `gitlab.TestHTTPClient_Reports_DecodesReportError` |
+| G10 / G12 / G3 | `HTTPClient.Reports` is still ONE logical read, cached once per group by the service (§5.2), done as: (a) every page of `iterations(first: 100, after:, includeAncestors: true)`; (b) §5.1 order (`iterations.Newer`), newest `MaxReportIterations` = 50; (c) `ReportBatchSize` = **1** aliased `iN: iteration(id: $idN) { id report(fullPath: $fullPath) {…} }` per request, at most `ReportConcurrency` = 4 in flight (`errgroup`, x/sync v0.8.0); (d) assembled newest first. Any failed request cancels the rest and fails the read (never cached). Batch size 1, not 5, because GitLab declares `report` with complexity 175 against an authenticated maximum of 250, so even two reports per query would be rejected. The builder supports any batch size. Each request scopes its own variables, so `$fullPath` is now `ID!` in list queries and `String` in report queries (the `$groupPath` workaround is gone). `/api/iterations` is unchanged: one request, first page only. | `gitlab.TestHTTPClient_Reports_ListThenBatchedReports` (**replaces** `TestHTTPClient_Reports_OneRequestFirst50`, which pinned the old single-query design; all of its decoding assertions are kept), `…_NewestFiftyAcrossPagesAndCadences` (120 iterations, 2 cadences, 3 pages: exact newest 50 incl. a start-date tie, every page read, no request > batch size, each chosen report fetched once, others never, ≤ 4 in flight and > 1), `…_OneFailedBatchFailsTheRead`, `…_ListFailureFailsTheRead`, `…_NoIterationsNoReportRequests`, `TestHTTPClient_Iterations_SinglePageEvenWhenMore` |
+| Row 7 / G13 | `groups.Depth` compares the root prefix with `strings.EqualFold` (GitLab paths are ASCII); `service.New` trims `/` from `RootGroup`. | `groups.TestDepth_CaseInsensitiveAndDeepRoot`, `service.TestGroups_RootCaseAndSlashesIgnored` (`Org/Delivery`, `org/delivery/`, `/ORG/DELIVERY/`), `service.TestGroups_ThreeSegmentRoot` |
+| G14 | `NewHTTPClient` copies the given `http.Client` and sets `CheckRedirect` → `ErrUseLastResponse`; a 3xx becomes `GitLab redirected the request to "<Location>"; set GITLAB_URL to GitLab's canonical address (redirects are not followed)`. Documented in `backend/README.md`. | `gitlab.TestHTTPClient_RefusesRedirects` (1 hit, message, caller's client untouched) |
+| Fail-open: panic/timeout | `CheckData` workers `recover` (panic ⇒ kept), in addition to the cache's recover. | `groups.TestCheckData_PanicAndTimeoutFailOpen`, `service.TestGroups_PanicAndTimeoutFailOpen` (client panics for team-2, blocks for gamma under a 200 ms deadline: both offered, no crash) |
+| Refresh scope (vacuity) | Added warm-cache variants; the originals are unchanged. | `service.TestReports_RefreshLeavesWarmListsAlone`, `api.TestReportsRefresh_LeavesWarmListsAlone` |
+| Mock | `Fake` matches group paths case-insensitively (data and `SetError`; counters stay per path as called). `Reports` keeps the newest 50 by §5.1, like the client, in stored order. Fixture: alpha/team-1 iid 1 has `report.error` (`TOO_MANY_EVENTS`, `mock.Team1ReportError`) and a null series. A.5 outcomes are unchanged. | `mock.TestFake_ReportsKeepsNewest50`, `mock.TestFake_PathsCaseInsensitive`, `mock.TestFixture_Team1ReportError` |
+
+Notes:
+- The ≤ 4 report requests in flight apply per group read. During a §4.4 data check (≤ 8 groups in
+  flight) this can reach 32 concurrent GitLab requests.
+- With batch size 1, a 50-iteration group costs 1–2 list requests plus 50 report requests (≈ 13 rounds at
+  concurrency 4). This cost is paid once per freshness window.
+- The complexity figures (175 per `report`, 250 maximum) come from GitLab's source. They were not verified
+  against a live instance.
+

@@ -52,6 +52,9 @@ type Report struct {
 type IterationReport struct {
 	Iteration
 	Report *Report `json:"report"`
+	// ReportError is GitLab's verbatim reason when it refused to build this
+	// iteration's report (TimeboxReport.error), else nil (JSON null).
+	ReportError *string `json:"reportError"`
 }
 
 type ErrorBody struct {

@@ -27,11 +27,17 @@ func IIDNumber(iid string) int {
 
 // Less reports whether a must be listed before b in newest-first order.
 func Less(a, b api.Iteration) bool {
-	sa, sb := startDate(a), startDate(b)
+	return Newer(a.StartDate, a.IID, b.StartDate, b.IID)
+}
+
+// Newer is Less on the raw ordering fields, for callers holding other
+// iteration types (e.g. GitLab's).
+func Newer(startA *string, iidA string, startB *string, iidB string) bool {
+	sa, sb := deref(startA), deref(startB)
 	if sa != sb {
 		return sa > sb
 	}
-	return IIDNumber(a.IID) > IIDNumber(b.IID)
+	return IIDNumber(iidA) > IIDNumber(iidB)
 }
 
 // Sort orders its in place, newest first (stable).
@@ -44,9 +50,9 @@ func SortReports(rs []api.IterationReport) {
 	sort.SliceStable(rs, func(i, j int) bool { return Less(rs[i].Iteration, rs[j].Iteration) })
 }
 
-func startDate(it api.Iteration) string {
-	if it.StartDate == nil {
+func deref(s *string) string {
+	if s == nil {
 		return ""
 	}
-	return *it.StartDate
+	return *s
 }

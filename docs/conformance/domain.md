@@ -205,3 +205,165 @@ Implementation hints that the tests force:
 16. **Negative zero**: `signedOneDecimal(-0)` → `+0.0`. A small negative such as −0.04 would render `-0.0` (literal rule); not pinned.
 17. **Float edge at 10 %**: an *average* deviation that is mathematically 10 % can compute to 10.000000000000002 % (e.g. mean of three 0.1s) and would be coloured caution. Not pinned; the §15.3 vector and single-iteration boundaries compute exactly.
 18. **Colour boundaries** follow A.6 (inclusive `≤ 10`, `≤ 20`, `≥ 70`, `≥ 50`); §15.3's colour words are errata.
+
+---
+
+## Conformance check (round 1)
+
+Checker: independent re-derivation of SPEC §2.3, §6, §7, §8, §9, §10.5, §11, §12, §13, §15.3–15.7, §15.10,
+§16 (#7–12, #17, #19, #21), A.6 against `frontend/src/domain/*.ts` (non-test). Evidence = `file:line`
+(all under `frontend/src/domain/`). "Probe" = ad-hoc script run against the real modules from the scratchpad
+(not in the repo); "mutant" = scratch copy of `src/` with one rule altered, domain tests re-run.
+
+Commands: `npx vitest run src/domain` → **12 files, 199 tests passed**. `npx tsc -b --noEmit` → **FAILS, exit 2**:
+`src/domain/testkit.ts(47,3): TS2741 Property 'reportError' is missing … required in type 'IterationReport'`.
+
+### Rule-by-rule
+
+| Item | Spec § | Verdict | Evidence | Note |
+|---|---|---|---|---|
+| Today = UTC calendar day, injectable | §7.2, #9 | MATCH | dates.ts:17-19 | `toISOString().slice(0,10)` |
+| Calendar-day arithmetic (UTC) | §7.3, #10 | AMBIGUOUS (accepted) | dates.ts:22-29 | Ledger #10 (mixed local/UTC) deliberately NOT reproduced; recorded as resolution #4 — allowed by §16 "change it deliberately and record the change". |
+| Unknown / null state = live | §9, #17 | MATCH | state.ts:7-14 | |
+| Live repair: not closed ∧ report ∧ no point today → append {today, committed, delivered, remaining = inProgress} at END | §7.2 | MATCH | curve.ts:57-61, 21-28 | Mutant "remaining = c−d" killed. |
+| Live repair identity when nothing added | §7.2 (res. #3) | MATCH (extension) | curve.ts:59 | Spec only demands identity for the closed repair; harmless. |
+| Closed repair: no points / no due / no report → unchanged | §7.2 | MATCH | curve.ts:71 | |
+| Closed repair: last point ≥ due → unchanged, **same reference** | §7.2, §15.10 | MATCH | curve.ts:72 | Uses array-last point (literal). Probe: `=== s2` true; `completeSeries(...) === report.series` true. Mutant `[...series]` killed. |
+| Closed repair appends due-date point with report totals | §7.2, §15.10 | MATCH | curve.ts:73 | Probe §15.10: 6th, 23rd → + 24th {12, 9, 3}. |
+| Additive only, input not mutated | §7.2 | MATCH | curve.ts:60, 73 | spread copies |
+| `completeSeries` dispatch | §7.2 | MATCH | curve.ts:81-84 | |
+| Axis = every series date | §7.3 | MATCH | curve.ts:98 | |
+| Trailing fill from LAST known point to due (inclusive), due date present | §7.3 | MATCH | curve.ts:99-104 | "Last" = latest date (res. #2); identical to array-last for real data + appended today point. Mutant "fill from first point" killed. Probe: 03-03, 03-05, due 03-08 → no 03-04, trailing 06–08 filled. |
+| Leading / interior holes not filled; weekends ordinary | §7.3 | MATCH | curve.ts:97-106 | |
+| Sort ascending as text | §7.3 | MATCH | curve.ts:105 | |
+| firstIndex, totalDays = max(last − firstIndex, 1) | §7.3 | MATCH | curve.ts:116-120 | |
+| Remaining: value or null (gap breaks), never clamped | §7.4, §7.1, #7 | MATCH | curve.ts:131-134 | |
+| Ideal: null before firstIndex; max(0, r − r/n·k); exactly 0 at end | §7.4 | MATCH | curve.ts:143-151 | Algebraically equal `r(1 − k/n)` (res. #1). Probe r=30,n=11 → last 0. Mutant "literal formula" killed (3.55e-15). |
+| committedTotal = report committed, else first point committed, else 0 | §7.5 | MATCH | curve.ts:164-167; model.ts:68 | Model passes date-sorted copy so "first" = chronological first. |
+| tolerance = committed × 10 %; ≤ 0 → no line | §7.5, §2.3 | MATCH | curve.ts:158, 170-172 | |
+| Burnup maxScope = largest committed | §7.6 | MATCH | curve.ts:225 | |
+| Burnup axis = series dates + up to 7 days after last point that are ≤ due | §7.6 | MATCH | curve.ts:179, 185-194 | Probe: due far → 7 extra days; due 03-05 → only 2. No due date → no extension (res. #10, reasonable). Mutant 8 days killed. |
+| Burnup Completed / Total scope | §7.6 | MATCH | curve.ts:235-236 | |
+| Burnup Ideal DESCENDS (burndown formula), null if span 0 | §7.6, #8 | MATCH | curve.ts:237 | Probe: 10 → 0 descending. |
+| Burnup Forecast: null ≤ last date, min(maxScope, lastDelivered + firstCommitted × calendar days) | §7.6, #8 | MATCH | curve.ts:228-230, 238-240 | Probe saturates at 12 on the first projected day. `maxScope/daysRemaining` fallback unreachable (empty series ⇒ empty series values) — acceptable. |
+| dailyDirection: last ≤5, <2 → 0, Σ changes ÷ (count−1), min(0, …) | §8.2 | MATCH | forecast.ts:48-54 | Mutant "no clamp" killed. |
+| shapeOf: filter committed ≠ 0; <2 → none | §8.3 | MATCH | forecast.ts:63-64 | |
+| shapeOf: start/end from UNFILTERED first/last; end ≤ start → none | §8.3 | MATCH | forecast.ts:65-67 | Probe: first point committed 0 at 03-01 still sets start → f = 0.5 for 03-03. Mutant "filtered start" killed. |
+| shapeOf: f clamped, y = max(0, remaining / THAT day's committed), sort by f | §8.3 | MATCH | forecast.ts:68-70 | Mutants "divide by first committed", "no y floor" killed. |
+| sample: empty 0; flat beyond ends; linear; zero-width no slope | §8.3 | MATCH | forecast.ts:78-93 | Bracket chosen so b.f > a.f strictly. Interior duplicate-f (only with duplicate dates) returns the later point's y — spec silent, unreachable for real data. |
+| canonicalShape: first ≤4 THEN shape & keep usable | §8.3, §6 | MATCH | forecast.ts:102-106 | Probe: `[[],[],[],[],usable]` → null. Mutant "filter before slice" killed. |
+| canonicalShape: 21-point grid, MEDIAN per point | §8.3, §2.3 | MATCH | forecast.ts:108-110 | Mutant "mean" killed. |
+| canonicalShape: single forward running-min sweep, floored at 0 | §8.3 | MATCH | forecast.ts:107-111 | Probe 10→8→2 shape: 1, .92 … .2 then flat .2 (never rises). Mutant "no running min" killed; "no floor" equivalent (y ≥ 0 already). |
+| shapeForecast: invalid / today ≥ end / no axis entry → NOT_USABLE | §8.3 | MATCH | forecast.ts:134 | |
+| shapeForecast: today looked up BY DATE; absent → NOT_USABLE | §8.3 | MATCH | forecast.ts:135-136 | |
+| shapeForecast: result length end+1, result[today] = today.remaining | §8.3 | MATCH | forecast.ts:138-139 | See "live anchors" ambiguity below. |
+| shapeForecast: remaining ≤ 0 → zeros after today, BEFORE history | §8.3 | MATCH | forecast.ts:140 | Mutant "after history" killed. |
+| shapeForecast: no shape → NOT_USABLE; start = series first; end = axis[end]; end ≤ start → NOT_USABLE | §8.3 | MATCH | forecast.ts:142-148 | |
+| shapeForecast: shapeToday ≤ 1e-9 → NOT_USABLE | §8.3 | MATCH (code) / test gap | forecast.ts:18, 151-152 | Mutant `shapeToday <= 0` **SURVIVES** — see MISSING T-1. |
+| shapeForecast: clamp(today × s(f)/shapeToday, 0, today.remaining) | §8.3 | MATCH | forecast.ts:153-155 | Mutant "no upper clamp" killed. |
+| velocityForecast: invalid / today ≥ end → EMPTY `[]` (≠ NOT_USABLE) | §8.1, §8.4 | MATCH | forecast.ts:190 | Mutant "null array" killed. |
+| velocityForecast: today = series[todayIndex] (by position), absent → unchanged array | §8.4 | MATCH | forecast.ts:191-194 | Mutant "by last point" killed. |
+| Rates: first ≤4 history, max(0, Δdelivered/(n−1)), strictly positive kept | §8.4 | MATCH | forecast.ts:164-169, 196-199 | n<2 → null (NaN in the literal formula is also discarded, same outcome). Mutant "keep zeros" killed. |
+| ownRate = max(0, −dailyDirection); appended if > 0; MEDIAN | §8.4 | MATCH | forecast.ts:200-203 | Mutant "no blend" killed. |
+| Loop: skip if previous has no value; velocity > 0 → max(0, r − v·k) else max(0, prev + trend) | §8.4 | MATCH | forecast.ts:205-210 | Skip rule present (line 207); it is never triggerable (result[today] always set) — mutant equivalent. |
+| Closed: straight-line extension of last direction, calendar days, no history | §8.1 | MATCH | forecast.ts:221-232, 259 | Mutant "continuation not floored" killed. |
+| Closed: "floored at zero" at the extension's FIRST position | §8.1, §2.3 ("a forecast never goes negative"), §15.4 | **MISMATCH** | forecast.ts:229 | Probe: last remaining −2 → `[null, -2, 0]`. See X-1. |
+| Strategy order: closed → ext; live ∧ today on axis → shape, NOT_USABLE → velocity; else none | §8.1 | MATCH | forecast.ts:257-266 | Probe §15.5 no history → strategy `velocity`. |
+| lastForecastValue / deviationPercent (≤ 0 → 0) | §8.5 | MATCH | forecast.ts:269-285 | |
+| History: last 4 closed that START BEFORE the selected one | §6 | MATCH | forecast.ts:293-305 | Strict `startDate < selected.startDate` filter, then first 4 of the newest-first list. Probe: closed iteration newer than selected and closed iteration with the SAME start both excluded. Mutants "ignore startDate", "≤" killed. Relies on caller's newest-first order (backend sorts: backend/internal/gitlab/http.go:192-196). |
+| Selected never in its own history | §6 | MATCH | forecast.ts:302 | Id check redundant with strict start filter (mutant equivalent). |
+| History series raw (no repair) | §6/§8 (res. #5) | MATCH | forecast.ts:308-310 | Spec never asks for history repair. |
+| No committed → no labels | §9, §7.5 | MATCH | deviationLabels.ts:37 | |
+| Green label at tolerance, unconditional | §9 | MATCH | deviationLabels.ts:38-40 | |
+| Orange only live, forecast has value, pct ≥ 1, text round(pct) | §9, #17 | MATCH (literal) | deviationLabels.ts:41-46 | But see X-2 (float noise at exactly 1 %). |
+| Gutter only when ≥ 1 label | §9 | MATCH | deviationLabels.ts:52-54 | |
+| Placement: map, order top→bottom, push lower to exactly one height, then clamp | §9 | MATCH | deviationLabels.ts:79-92 | Literal order (res. #11). |
+| Label size formulas & constants | §10.5, §15.7 | MATCH | annotationGeometry.ts:6-45 | |
+| Band overlap test half-open | §10.5 | MATCH | annotationGeometry.ts:48-50 | |
+| Drop off-axis; axis order; return input order | §10.5 | MATCH | annotationGeometry.ts:86-93, 105 | Probe: [B, X, A] → X dropped, A stacked first (20), B on top (60), returned B, A. Mutant "input order" killed. |
+| Per-earlier-label while loop; pointOffset loop on marker band ±5; offset = max | §10.5 | MATCH | annotationGeometry.ts:95-101 | Mutant "pointOffset ignored" killed. |
+| Unclamped, workload units | §10.5, #11 | MATCH | annotationGeometry.ts:65, 78 | Probe: 15 labels top at 653 for value 50. |
+| Uniform horizontal push; vertical half rule | §10.5, #12 | MATCH | annotationGeometry.ts:113-123 | Centre/midpoint tie (res. #12) reasonable. |
+| Guarantee "later date stacks at least as high as earlier" | §10.5 | AMBIGUOUS | annotationGeometry.ts:93-101 | Holds only when labels interact. Probe: A,A at value 10 (offsets 20, 60), B at value 500 → offset 20. The pseudo-code (followed literally) cannot guarantee it universally; spec text over-states it. |
+| closedForScore: closed, newest-first, FIRST 4 | §11.2 | MATCH | predictability.ts:35-37 | Mutant "last 4" killed. |
+| Skip no report / committed ≤ 0 (no back-fill) | §11.2 | MATCH | predictability.ts:47-48 | |
+| Signed difference; unsigned deviation fraction | §11.2 | MATCH | predictability.ts:49-52 | Mutant "abs diff" killed. |
+| Compliant STRICTLY < 0.10 | §11.2, §2.3 | MATCH (judgement) | predictability.ts:56 | Compared after 9-decimal rounding; preserves "exactly 10 % not compliant" against float noise. Comment cites "ambiguity #13" — should be #17. |
+| Mean / mean / MEDIAN of delivered / share / count | §11.2 | MATCH | predictability.ts:57-63 | Mutant "median of committed" killed. |
+| No closed → `[]` (no read); nothing recorded → NO_SCORE (distinct) | §11.2 | MATCH | predictability.ts:14, 36, 54 | |
+| Presentation texts, caption ≥ 0 Under-delivered, velocity uncoloured, `{n} sprint(s)` | §11.3, #19 | MATCH | predictability.ts:88-101; strings.ts:62 | |
+| Tones A.6 inclusive (≤10/≤20, ≤2/≤5 on \|d\|, ≥70/≥50) | §2.3, A.6 | MATCH | colorScale.ts:13-28 | 9-decimal `settle` is a builder judgement; does not change any value away from a boundary. Mutants on each boundary killed. |
+| §12 strip deviation/difference/texts/tones | §12 | MATCH | metrics.ts:17-42 | |
+| §3.2 summary percentages (0 when committed 0), whole %, one-decimal "of" | §3.2, §13 | MATCH | metrics.ts:59-74 | |
+| §13 formats (one decimal, signed `+` when ≥ 0, whole %, dates `start → due`) | §13 | MATCH | format.ts:6-44 | |
+| Score timeout 30 s | §2.3, #21 | N/A (UI) | — | Not a domain-module concern. |
+| Model wiring (sorted copy for forecast/committed; series identity; todayIndex only live) | §7–§9 | MATCH | model.ts:60-89 | |
+| Live forecast anchor value when today.remaining < 0 | §8.3/§8.4 vs §2.3, §15.4 | AMBIGUOUS | forecast.ts:139, 194 | Pseudo-code says `result[todayIndex] = today.remaining` and guarantee 1 says "exactly through today's real value", but §2.3 "a forecast never goes negative" / §15.4 "a forecast value is never negative". Code follows the pseudo-code (probe: `[null,-2,0]`). Spec owner to decide; no change requested. |
+| `tsc -b --noEmit` clean | build | **MISMATCH** | testkit.ts:38-56 | See X-3. |
+
+### §15 acceptance vectors (computed independently by probe)
+
+| Item | Spec § | Verdict | Evidence | Note |
+|---|---|---|---|---|
+| (50,45)(40,40)(30,24)(20,21) → 0.0875 / 2.5 / 32 / 50 % / 4 | §15.3 | MATCH | probe | averageDeviation = 0.08750000000000001 |
+| Display `8.8 %` good · `+2.5 pts` caution · `50 %` caution · `32.0 pts` | §15.3 + A.6 | MATCH | probe | |
+| 5th (older) 200-pt outlier → count 4, median 32 | §15.3 | MATCH | probe | (If the outlier were the NEWEST closed one it would be scored: median 42.5 — consistent with "first 4 from newest-first"; the spec example implies an older fifth.) |
+| No closed iteration → `[]`, NO_SCORE | §15.3 | MATCH | probe | |
+| History 10/day, today 30, direction −5 → 22.5, 15, 7.5 | §15.4 | MATCH | probe | `[…,30,22.5,15,7.5]` |
+| 5/day vs 40 remaining → above zero at due | §15.4 | MATCH | probe | no history: 35…5 at due (7 days) |
+| Never negative | §15.4 | MATCH (projections) | probe | Anchors: see X-1 / live-anchor ambiguity. |
+| Shape: 50 on day 6/11 → 50, day 8 = 30, due = 0 | §15.5 | MATCH | probe | exact 30 / 0 |
+| Shape: 40 → day 8 = 24, due 0 | §15.5 | MATCH | probe | |
+| Shape: 0 → zeros | §15.5 | MATCH | probe | |
+| No history → shape declines, velocity answers | §15.5 | MATCH | probe | NOT_USABLE; strategy `velocity` |
+| Labels: 100/live/10 → green+orange at 10; 0.5 → green; closed → green; committed 0 → none | §15.6 | MATCH | probe | |
+| Sizes 40×23, 23/36/49/49, 400 chars → 164 | §15.7 | MATCH | probe | |
+| 15 same-day labels: no overlap, stack above range | §15.7 | MATCH | probe | offsets 20…580, no overlap |
+| Closed 6th/23rd due 24th → +24th with totals; already reaching → same ref; live → today point | §15.10 | MATCH | probe | |
+
+### Analyst resolutions / builder judgement calls
+
+| Item | Spec § | Verdict | Evidence | Note |
+|---|---|---|---|---|
+| Res. #1–#3, #5–#9, #11–#16, #18 | various | MATCH / acceptable | — | None contradicts spec text. |
+| Res. #4 (ledger #10 not reproduced) | §16 #10 | AMBIGUOUS (accepted) | dates.ts | Deliberate change, recorded here; §16 permits it if recorded. |
+| Res. #9 closed extension "includes the last point's own value" | §8.1 | MISMATCH (partly) | forecast.ts:229 | Including the anchor is fine; leaving it UNFLOORED is not — X-1. |
+| Res. #10 burnup without due date | §7.6 | AMBIGUOUS (accepted) | curve.ts:187 | |
+| Res. #17 "Not pinned … would be coloured caution" | §2.3 | Stale doc | colorScale.ts:7-10 | Builder now settles to 9 decimals, so a mean of three 0.1s is coloured GOOD. Code is the better reading; update the resolution text. |
+| Builder: 9-decimal `settle` on tones and compliance | §2.3, §11.2, A.6 | MATCH (judgement) | colorScale.ts:10; predictability.ts:56 | Protects the stated boundaries from float noise. |
+| Should the 1 % orange floor also settle? | §2.3, §9 | **Yes → MISMATCH** | deviationLabels.ts:43-45 | Same kind of inclusive business threshold; without it a forecast mathematically at exactly 1 % is suppressed. Probe: 87 integer committed values c ≤ 1000 (e.g. 29, 57, 58, 69) with forecast end c/100 give pct = 0.9999999999999999 → no label; velocity-produced ends (e.g. r=0.3, v=0.1, k=2, c=10) likewise. — X-2. |
+| Negative value at closed-extension first position | §8.1 | **Not acceptable → MISMATCH** | forecast.ts:229 | §8.1 has no pseudo-code for closed; its prose says "floored at zero", reinforced by §2.3 "a forecast never goes negative" and §8.4/§15.4. Unlike the live strategies, no pseudo-code line forces an unfloored anchor. — X-1. |
+| History = last 4 closed that START BEFORE selected (not just "older in list") | §6 | MATCH | forecast.ts:300-304 | Implemented by start-date comparison; list order only decides which 4 are "last". |
+
+### Test vacuity audit (mutation probes on a scratch copy)
+
+45 mutants on the rules above; 40 killed. Survivors: M9 `shapeToday <= 0` instead of `<= 1e-9` (**real gap**);
+M26 velocity skip rule, M27 `f > last.f`, M30 drop selected-id check, M40 drop canonical floor — all
+**equivalent** (unobservable). Existing test "declines when the canonical shape had already collapsed" uses
+shapeToday = 0 exactly, so the 1e-9 boundary is unverified.
+
+### Fixes required (round 1)
+
+| Item | Spec § | Verdict | Evidence | Fix |
+|---|---|---|---|---|
+| X-1 closed-extension anchor unfloored | §8.1, §2.3 | MISMATCH | forecast.ts:229 | `if (i === lastIndex) return Math.max(0, last.remaining)` (equivalently use the uniform `max(0, last.remaining + d × days)` for all i ≥ lastIndex); add a test: closed series ending at remaining −2 → anchor 0. |
+| X-2 1 % floor not float-settled | §2.3, §9 | MISMATCH | deviationLabels.ts:43-45 | Settle pct to 9 decimals (share the `settle` helper from colorScale.ts) before both `≥ 1` and `Math.round`; test: committed 29, forecast ends 0.29 → orange `Deviation +1 %`. |
+| X-3 typecheck fails | build | MISMATCH | testkit.ts:47 | Add `reportError: null` (optionally a `reportError?` param) to `makeIteration`. |
+| T-1 1e-9 collapse boundary untested | §8.3 | MISSING (test) | forecast.test.ts:265-269 | Add a case where canonical shapeToday ∈ (0, 1e-9] → NOT_USABLE and one just above (e.g. 2e-9) → usable. |
+
+**Round-1 summary.** Rows: ~92 MATCH (incl. judgement/extension variants), 5 AMBIGUOUS (3 accepted
+resolutions, live-anchor sign, "later stacks higher" guarantee), 1 N/A, 1 stale-doc note; distinct defects:
+**3 MISMATCH** (X-1 closed-extension anchor unfloored, X-2 1 % floor not float-settled, X-3 `tsc` fails in
+testkit.ts) and **1 MISSING** (T-1 test for the 1e-9 collapse boundary). All §15.3–15.7 and §15.10 vectors
+reproduce exactly.
+
+### Round 1 fixes (orchestrator)
+
+| Finding | Fix | Pinning test |
+|---|---|---|
+| X-1 closed extension negative at last point | `forecast.ts` `closedExtension`: `Math.max(0, last.remaining)` | `never negative, including at the last recorded point` |
+| X-2 1 % floor flipped by float noise | `deviationLabels.ts`: `settle()` (shared in `stats.ts`, also used by `colorScale.ts`, `predictability.ts`) before `≥ 1` and `Math.round` | `a forecast at exactly 1 % in maths is not hidden by float noise` |
+| X-3 `reportError` missing in testkit | `testkit.ts` `makeIteration`: `reportError: null` | `tsc` |
+| T-1 1e-9 threshold untested | — | `declines when shapeToday is positive but ≤ 1e-9, and answers just above it` |
+
+Result: 202/202 domain tests pass. Ambiguity #17 is superseded: a mean of three 0.1 deviations is coloured **good**.
