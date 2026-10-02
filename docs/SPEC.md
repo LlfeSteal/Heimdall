@@ -1233,6 +1233,12 @@ So for §15.3: `8.8 %` → **good**, `+2.5 pts` → **caution**, `50 %` → **ca
     `Report = { series: SeriesPoint[], totals: { committed: Total, delivered: Total, inProgress: Total } }`,
     `SeriesPoint = { date, committed, delivered, remaining }`, `Total = { weight, count }`
   - Errors: non-2xx with `{ error: "<verbatim message>" }`.
+- §5.2 "one read per group" is realised as ONE logical, cached read per group per freshness window: the
+  backend lists the group's iterations (all pages), keeps the newest 50 by the §5.1 order, then fetches each
+  report in its own GraphQL request (a `report` field costs ≈175 of GitLab's 250 complexity budget, so
+  batching two per request is rejected), with bounded concurrency. Any failed request fails the whole read
+  (never cached). Iterations older than the newest 50 have no report entry; the chart region shows
+  `No burnup data found for this iteration (check permissions or format).` for them.
 - GitLab GraphQL mapping: `burnupTimeSeries { date scopeWeight completedWeight }` → committed = scopeWeight,
   delivered = completedWeight, remaining = committed − delivered (not clamped).
   `stats { total complete incomplete { count weight } }` → committed / delivered / inProgress.

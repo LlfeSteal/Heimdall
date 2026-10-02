@@ -371,3 +371,126 @@ Notes:
 - The complexity figures (175 per `report`, 250 maximum) come from GitLab's source. They were not verified
   against a live instance.
 
+
+---
+
+## Conformance check (round 2)
+
+Checker: independent spec-vs-code re-read of commit `5edbe7e` (2026-10-02). Code and tests not modified. Paths
+are relative to `backend/`. Commands run: `GOFLAGS=-buildvcs=false go vet ./...` (clean); `go test -race
+-count=1 ./...` (161 passed, 10 packages, 0 failed); `gofmt -l .` (clean). Mock smoke test (binary built from
+`./cmd/heimdall`, `GITLAB_MOCK=1 ROOT_GROUP=org/delivery PORT=18082 GITLAB_TOKEN=<dummy>`, then killed):
+`/api/groups` → `alpha[team-1]`, `beta[x]`, `delta[]` (also 3 with `?refresh=1`);
+`/api/reports?group=org/delivery/alpha/team-1` → 200, 9 items in the order 8, 7, 6, 5, 9, 4, 3, 2, 1 (the
+iid 9/4 start-date tie is broken by iid, descending). iid 1 has `reportError` = "Burnup chart could not be
+generated due to too many events" with an empty series; every other item has `reportError: null`.
+`/api/iterations?group=ORG/delivery/alpha/team-1` → same order. delta `/api/reports` → 502 with the verbatim
+message. Missing `group` → 400. `/api/config` = `{"groupTerm":"ART","rootGroup":"org/delivery"}`. The dummy
+token appears 0 times in the server log.
+
+Extra probes ran through a `go test -overlay` scratch file outside the repo. Each one used the real
+`HTTPClient` and `Service` against an `httptest` GitLab:
+- **P1:** 12 candidate groups × 60 iterations → max **32** concurrent GitLab requests; 613 requests in total
+  (12 descendants/list + 600 report requests).
+- **P2:** every `iN` comes back `null` for one group → that group's read succeeds with `report: null,
+  reportError: null` on all items, and the group is **hidden**.
+- **P3:** a complexity error on one report request → `/api/reports` fails with GitLab's message verbatim.
+  The group stays offered (fail open). After the error clears, the next read goes back to GitLab (4 requests),
+  so the failed read was not cached.
+
+### A. Round-1 findings re-verified
+
+| # | Item | Spec § | Verdict | Evidence | Note |
+|---|---|---|---|---|---|
+| R1 | `reportError` contract field: always present, `null` when none, GitLab's `TimeboxReport.error.message` verbatim | Impl. notes, §14.3 | MATCH | `internal/api/types.go:52-58` (no `omitempty`); `internal/reports/normalize.go:31-37,79-88`; `internal/gitlab/types.go:75-87`; `internal/gitlab/http.go:88` (`error { code message }`) | Falls back to `code` when `message` is empty. That is an extension, and harmless. Smoke test + `api.TestReports_ReportErrorOverHTTP` |
+| R2 | Data check: no series anywhere but ≥ 1 `reportError` → failed read → kept | Impl. notes, §4.4 | MATCH | `internal/groups/groups.go:108-117,149-157` (`err ∥ HasCurve ∥ HasReportError`) | Same outcome as the contract sentence: a curve or a refused report both keep the group. `groups.TestCheckData_ReportErrorIsAFailedRead`, `service.TestGroups_RefusedReportKeepsGroup` |
+| R3 | Batched read (a): list **all** iteration pages | §5.2, §6 | MATCH | `internal/gitlab/http.go:175-188` (`first: 100`, `after`, stops on `hasNextPage=false` or an empty cursor `:102-108`) | `TestHTTPClient_Reports_NewestFiftyAcrossPagesAndCadences` asserts every page is read |
+| R4 | Batched read (b): newest 50 by the §5.1 rule, across cadences | §5.1, §5.2 | MATCH | `internal/gitlab/http.go:190-197` (`iterations.Newer`, stable), `types.go:14` | Fixes round-1 G3. Same test: 120 iterations, 2 cadences, start-date tie |
+| R5 | Batched read (c): small batches, bounded concurrency | §5.2 (as amended by the orchestrator) | MATCH | `internal/gitlab/http.go:199-214` (`errgroup.SetLimit(ReportConcurrency=4)`), `:218-249` (aliased `iN: iteration(id: $idN)`), `types.go:20,24` (`ReportBatchSize=1`) | Test asserts ≤ 4 and ≥ 2 in flight, ≤ batch size per request, each chosen report fetched once |
+| R6 | Batched read (d): ONE cached answer per group; any failed request fails the whole read; failure never cached | §14.1, §5.2 | MATCH | `internal/service/service.go:130-141` (one key `reports/<group>`); `http.go:210-212` (first error returned, no partial data); `internal/cache/cache.go:129-136` (store only when `err == nil`) | `…_OneFailedBatchFailsTheRead` (verbatim, `got == nil`), `…_ListFailureFailsTheRead`; probe P3 confirms it is not cached end to end |
+| R7 | Case-insensitive ROOT_GROUP | A.3 #2 | MATCH | `internal/groups/groups.go:39-48` (`EqualFold` on root prefix and equality) | `TestDepth_CaseInsensitiveAndDeepRoot`, `service.TestGroups_RootCaseAndSlashesIgnored` (`Org/Delivery`, `/ORG/DELIVERY/`). Cards carry GitLab's canonical paths |
+| R8 | Trailing/leading slash on ROOT_GROUP | A.3 #2 | MATCH | `internal/config/config.go:24`; `internal/service/service.go:59` | Now normalised in `service.New` as well |
+| R9 | 3-segment roots | A.3 #2 | MATCH | `groups.go:39-48` | `service.TestGroups_ThreeSegmentRoot` (depth 3 and the `a/b/cx` prefix trap are not data-checked) |
+| R10 | Redirect refused with a clear message | (G14) | MATCH | `internal/gitlab/http.go:51-58` (copies the client, `ErrUseLastResponse`), `:304-307`; `README.md:19-22` | `TestHTTPClient_RefusesRedirects` (1 hit, message names `GITLAB_URL` and the target, caller's client untouched) |
+| R11 | `recover` in data-check workers | §4.4 "fails for any reason" | MATCH | `internal/groups/groups.go:149-157` | `groups.TestCheckData_PanicAndTimeoutFailOpen`, `service.TestGroups_PanicAndTimeoutFailOpen` (panic + 200 ms deadline: both kept, no crash) |
+| R12 | Refresh-scope tests no longer vacuous | §14.2 | MATCH | `internal/service/round1_test.go:168-205`, `internal/api/round1_test.go:11-27` | Both warm the iteration list and the group list first, then refresh reports, then read both lists again and assert no new read. An implementation that purges those caches would now fail |
+
+### B. Regression sweep
+
+| # | Item | Spec § | Verdict | Evidence | Note |
+|---|---|---|---|---|---|
+| S1 | Cache: 5 min TTL, single-flight, errors never remembered, refresh discards first, bounded LRU, per-parameter keys | §14.1, §15.9 | MATCH | `internal/cache/cache.go` unchanged since round 1 (`git diff ec7debc 5edbe7e` touches no cache file) | The batched sub-requests all run inside one `fetch`, so single-flight still covers the whole group read |
+| S2 | Review Refresh re-reads only that group's reports; group Refresh forces descendants and every data-check read; `/api/iterations` ignores refresh | §14.2, §16 #16 | MATCH | `internal/api/router.go:43-62` (unchanged); `service.go:73-92,97,120-126` | R12 |
+| S3 | ≤ 8 groups in flight, input order, fail-open (error / panic / timeout / refused report) | §4.4, A.3 #4 | MATCH | `groups.go:133-157` | Per-group sub-request concurrency is a separate dimension. See S11 |
+| S4 | No separate health signal; the data check uses the chart's read | §4.4 | MATCH | `service.go:87-90` → `cachedReports` | |
+| S5 | A.3 card rules (depth-1 cards, passing depth-2 tiles, beta kept, gamma hidden, synthetic parent, sort, labels) | A.3 #5–#8, A.5 | MATCH | `groups.go:173-232` (unchanged apart from `Depth`) | Smoke test = A.5 (3 cards) |
+| S6 | §5.1 newest-first ordering + tie-break; missing group → `[]` | §5.1, §15.2 | MATCH | `internal/iterations/order.go:29-46` (refactor into `Newer` changes no behaviour); `http.go:169-171` | Smoke test: 9/4 tie handled |
+| S7 | Opening a second iteration does not re-read | §5.2 | MATCH | `service.go:130-141` (cache hit on `reports/<group>`) | `api.TestReports_OneReadPerGroupAndRefresh` |
+| S8 | "One read per group … not one per iteration" | §5.2 | MATCH (wire-level deviation, by orchestrator decision) | `http.go:155-161` | At the app level there is still one logical, cached read. On the wire it is now 1–2 list requests + up to 50 report requests (one per iteration), which GitLab's complexity limit forces. `SPEC.md` still says "a single read … returns all of its iterations at once"; nothing in the Implementation notes records the batched design. **Recommend** adding one implementation-note line. |
+| S9 | Read-only (no mutations) | §1.4 | MATCH | Only `query(…)` documents (`http.go:63-90,237-249`); no "mutation" in any non-test file | |
+| S10 | Token never logged or exposed | Impl. notes | MATCH | `http.go:292` (header only); `main.go:58-68`; `api/types.go:4-7` | Smoke log: 0 occurrences. Error strings carry at most the URL or the redirect `Location`, never headers |
+| S11 | Worst-case concurrent GitLab requests | §4.4 (spirit), §14.3 | RISK (medium) | `groups.go:28` (8) × `gitlab/types.go:24` (4) | Probe P1: **32** in flight during a cold or refreshed group list, plus any concurrent `/api/reports` reads. Each request is an expensive burnup computation on GitLab. Request volume per group-list load/Refresh ≈ Σ over candidates of (⌈its/100⌉ + min(50, its)), e.g. 40 teams × 50 iterations ≈ 2,050 requests. That is at GitLab.com's authenticated API rate limit (2,000/min), and a 429 fails the read (fail open: groups stay, charts error). Cold group-list latency is about ⌈N/8⌉ × ⌈50/4⌉ report round-trips (≈ 65 s for 40 groups at 1 s per report). §4.4's "8 in flight" is met to the letter, but its load-bounding intent is not. **Fix (pick):** a process-wide limiter on report requests (e.g. 8–16 shared by every group read); retry 429/503 with `Retry-After` (bounded) before failing the read; `http.Transport{MaxIdleConnsPerHost: 32}` (the default of 2 causes connection churn at 32 in flight). |
+| S12 | Batch size 1 justified by complexity | — | MATCH (based on GitLab source, unverified live) | `types.go:16-20` | Estimated cost of one aliased request: `iteration` 1 + `id` 1 + `report` 175 + burnupTimeSeries 6 + stats 10 + error 3 ≈ **196 ≤ 250** (authenticated max). Two reports ≈ 392 would be rejected, so 1 is the only safe value. `scopeCount`/`completedCount` are selected but unused (cost 2, harmless). Test gap: `TestHTTPClient_Reports_ListThenBatchedReports` accepts `ReportBatchSize` up to 5, so a change to 2 would pass the suite and then fail on a live GitLab. Pin it to 1, or add a complexity-budget test. |
+| S13 | Null `iN` node (iteration not readable or deleted between the list and the report request) | §4.4, §14.3 | RISK (low) | `http.go:229-233` (a nil node leaves `Report` nil silently) | Probe P2: if every node is null, the group is **hidden**, which is exactly what §4.4 fail-open forbids for permission blips, and the chart gets no reason. It can happen because `Query.iteration(id:)` authorises `read_iteration` on the iteration's own (possibly ancestor, via `includeAncestors`) group. The round-0 design nested `report` under `group.iterations` and never hit this case. **Fix:** treat a null `iN` with no `errors` as a failed read (e.g. `GitLab returned no data for iteration <id>`), or fetch through `group(fullPath:){ iterations(id: $id, includeAncestors: true, first: 1){ nodes{ report(…) } } }`. |
+| S14 | Total time of one group read is unbounded | §14.3 | RISK (low) | `main.go:27` (25 s per request), no overall deadline; the cache `fetch` runs under `WithoutCancel` | 13 sequential rounds × up to 25 s. The read is not cancelled when the browser gives up (intended, it is shared). Consider an overall deadline per group read (e.g. 2 min). |
+| S15 | Chooser vs report coverage | §5.1 ledger #2, §6 | Note (pre-existing) | `/api/iterations` = first 100 by `CADENCE_AND_DUE_DATE_DESC`; `/api/reports` = global newest 50 | A listed iteration older than the newest 50 (or, with several cadences, missing from page 1) has no report entry. Already true in round 1; the frontend must show a placeholder or error rather than an empty chart frame. |
+
+### C. GraphQL schema check (from GitLab's published schema/source; NOT verified against a live instance)
+
+| # | Item | Verdict | Evidence | Note |
+|---|---|---|---|---|
+| Q1 | `group(fullPath: ID!)` with `$fullPath: ID!` (descendants, list) | OK | `http.go:63-79` | `find_by_full_path` is case-insensitive, so R7 works end to end |
+| Q2 | `descendantGroups(first: 100, after: String)` → `nodes{id fullPath name}`, `pageInfo{hasNextPage endCursor}` | OK | `http.go:63-70` | 100 = GitLab's `max_page_size` |
+| Q3 | `iterations(first: 100, after:, includeAncestors: true, sort: CADENCE_AND_DUE_DATE_DESC)` | OK | `http.go:72-79` | Valid `IterationSort` value. Order no longer matters for Reports (all pages are read and sorted locally); it still decides page 1 of `/api/iterations` (S15) |
+| Q4 | `Query.iteration(id: IterationID!)` with `$idN: IterationID!` fed from the listed `id` (`gid://gitlab/Iteration/N`) | OK | `http.go:237-249` | EE query "Find an iteration". Nullable: unauthorised → `null` without `errors` (S13) |
+| Q5 | `Iteration.report(fullPath: String)` with `$fullPath: String` | OK | `http.go:81,239` | Correct argument type (`String`, not `ID`); the variable is used only by `report` |
+| Q6 | `TimeboxReport.error { code message }` (`TimeboxReportError`: `code: TimeboxReportErrorReason`, `message: String`) | OK, version-dependent RISK (low) | `http.go:88` | This field was added later than `burnupTimeSeries`. On a GitLab version that lacks it, every report request fails validation ("Field 'error' doesn't exist on type 'TimeboxReport'"): every chart errors and every group is kept. **Fix:** document the minimum GitLab version in `README.md`, or retry once without `error` when that exact validation error comes back. |
+| Q7 | `burnupTimeSeries{date scopeCount scopeWeight completedCount completedWeight}`, `stats{total complete incomplete{count weight}}` | OK | `http.go:82-87` | Non-null `Int!` in GitLab; null is still tolerated |
+| Q8 | Complexity per request ≈ 196 / 250; depth 5 / 15 | OK | S12 | |
+| Q9 | Older GitLab raising report failures as GraphQL `errors` instead of `report.error` | Note | `http.go:320-322` | On such versions one bad iteration fails the whole group read (all 50 charts error, group kept). This follows the "any failure fails the whole read" rule, so it is accepted; it only matters together with Q6. |
+
+### Verdict counts (round 2)
+
+Section A (round-1 items, 12 rows): **MATCH 12**. All round-1 MISSING/RISK items (row 7/G13, row 18/G9,
+G3, G10, G12, G14, panic `recover`, refresh-test vacuity) are resolved.
+Section B (15 rows): MATCH 10 (S8 with a documentation note) · RISK 3 (S11 medium, S13 low, S14 low) · Note 1 (S15) ·
+MISMATCH 0 · MISSING 0.
+Section C (9 rows): OK 8 (Q6 OK with a low version risk) · Note 1.
+
+**Remaining items and fixes**
+1. **S11 (RISK, medium): load / rate limit / latency.** 32 concurrent and ≈ 50 requests per group per
+   window. Fix: a process-wide report-request limiter, bounded retry on 429/503 honouring `Retry-After`,
+   and `MaxIdleConnsPerHost ≥ 32`.
+2. **S13 (RISK, low): null `iN` silently becomes `report: null`** and can hide a group. Fix: treat a null node
+   as a failed read with a message, or nest the report under `group.iterations(id:)`.
+3. **S12 (test gap): batch size not pinned.** Fix: assert `ReportBatchSize == 1`, or test a complexity budget.
+4. **S14 (RISK, low): no overall deadline on a group read.** Fix: add a per-read deadline.
+5. **Q6 (RISK, low): `TimeboxReport.error` needs a recent GitLab.** Fix: state the minimum version, or fall back.
+6. **S8 (doc):** add an implementation note to `SPEC.md` describing the batched "one logical read".
+
+---
+
+## Round 2 fixes (builder)
+
+Verify: `cd backend && GOFLAGS=-buildvcs=false go vet ./... && go test -race -count=1 ./...` → 177 passed
+(127 tests + 50 subtests), 11 packages (now including `config`), 0 failed; `gofmt -l .` clean.
+Mock smoke test (`GITLAB_MAX_CONCURRENCY=6 GITLAB_READ_TIMEOUT=30s GITLAB_TOKEN=dummy-secret`) gave:
+- `alpha[team-1]`, `beta[x]`, `delta[]`;
+- team-1 reports in the order `8 7 6 5 9 4 3 2 1`, with iid 1 `reportError`;
+- delta → 502, message verbatim;
+- `GITLAB_READ_TIMEOUT=soon` → startup error;
+- 0 token occurrences in the log.
+
+| Finding | Fix | Pinned by (new tests) |
+|---|---|---|
+| S11 limiter | `HTTPClient` holds one semaphore shared by **every** GitLab request it makes (reports, iteration lists, descendants), not only report requests, which is the simpler and stricter reading. Size `Options.MaxConcurrency`, default `DefaultMaxConcurrency` = 12, env `GITLAB_MAX_CONCURRENCY` → `config.MaxConcurrency` → `gitlab.NewHTTPClientWithOptions` (new constructor; `NewHTTPClient` is unchanged and uses the defaults). The per-group limit of 4 still applies. A slot is held per HTTP attempt and released while waiting to retry. | `gitlab.TestHTTPClient_GlobalLimitAcrossGroupReads` (8 simultaneous group reads; default 12 and configured 3; max in flight ≤ limit and ≥ min(limit, 5)) |
+| S11 retry | `do` retries 429/502/503/504 up to `MaxAttempts` = 3 attempts. The wait is `Retry-After` (seconds or HTTP date) capped at `MaxRetryWait` = 10 s, else 300 ms·2^(n−1)·[0.5, 1.5). The wait gives up when the context ends. Other statuses and GraphQL `errors` are not retried. When attempts run out, the error is GitLab's message verbatim. | `gitlab.TestHTTPClient_RetriesBusyThenSucceeds` (429 + Retry-After; 503 backoff), `…_PersistentBusyFailsWithGitLabMessage` (exactly 3 requests, verbatim), `…_OtherFailuresNotRetried` (401 → 1 request), `…_RetryWaitHonoursContext`, internal `TestParseRetryAfter`, `TestBusyWait_CappedAndJittered` |
+| S11 transport | When the given `http.Client` has no Transport, a clone of `http.DefaultTransport` is used with `MaxIdleConnsPerHost = max(32, limit)` and `MaxIdleConns = max(64, limit)`. `main.go` passes a client without a Transport (25 s timeout), so this applies in production. | covered by the suite (all client tests run through it unless they pass `srv.Client()`) |
+| S13 null node | A null `iN` is now a failed read: `GitLab returned no data for iteration <id> (deleted, or not readable with this token)`. The whole read fails and is not cached, and §4.4 keeps the group. | `gitlab.TestHTTPClient_Reports_NullNodeIsFailedRead` |
+| S12 | Pinned `ReportBatchSize == 1`; the comment cites ≈196 per report vs the maximum of 250. | `gitlab.TestReportBatchSizeIsOne` |
+| S14 deadline | Every cache fetch in `service` (descendants, iterations, reports) runs under `context.WithTimeout(Options.ReadTimeout)`, default `DefaultReadTimeout` = 90 s, env `GITLAB_READ_TIMEOUT` (`90`, `90s`, `2m`). The fetch context is already detached from the caller, so this is the only deadline. Running out → `GitLab did not answer within <d>`, a failed read that is not cached. | `service.TestReadTimeout_FailedReadNotCached` (50 ms deadline: message, prompt return, group kept by the data check, next read fetches again), `service.TestDefaultReadTimeout`, `config.TestLoad_GitLabLimits` |
+| Q6 / doc | `backend/README.md` now has: "GitLab requirements" (Premium/Ultimate; `TimeboxReport.error` required, plus what happens without it; the exact first version is **not verified**, believed to be the 15 series; an introspection query to check an instance; `read_api` token); the new env vars; the retry policy; a request-budget table (≈ 1 + N requests per group per 5 min, worked 40 × 50 example vs GitLab.com's 2,000/min). | — |
+
+Not done (out of `backend/` scope): S8's `SPEC.md` implementation note describing the batched "one logical
+read". Suggested wording: "`/api/reports` is one cached logical read per group, executed as the paginated
+iteration list plus one `iteration(id:){report}` request per chosen iteration (GitLab's complexity limit)."

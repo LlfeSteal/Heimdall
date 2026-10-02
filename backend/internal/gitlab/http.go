@@ -7,9 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -38,23 +41,65 @@ import (
 //   - a non-2xx response is an error; if the body is JSON with `errors[].message`
 //     or a string `message`/`error` field, that text MUST appear in the error;
 //   - redirects are refused (Go would replay the POST as a body-less GET);
+//   - at most Options.MaxConcurrency requests are in flight across the whole
+//     client (every read of every group shares the budget);
+//   - 429/502/503/504 are retried, MaxAttempts attempts in total, waiting for
+//     Retry-After (capped at MaxRetryWait) or a jittered backoff;
 //   - `data.group == null` → empty result, nil error.
 type HTTPClient struct {
 	baseURL string
 	token   string
 	http    *http.Client
+	slots   chan struct{} // process-wide request limiter
 }
 
-// NewHTTPClient builds a client. baseURL is GITLAB_URL without trailing slash
-// (a trailing slash MUST be tolerated). hc nil → a default client. hc is
-// copied, so the caller's client is not modified.
+// DefaultMaxConcurrency is the default process-wide cap on GitLab requests in
+// flight (env GITLAB_MAX_CONCURRENCY).
+const DefaultMaxConcurrency = 12
+
+// Options tunes an HTTPClient. Zero values select the defaults.
+type Options struct {
+	MaxConcurrency int // GitLab requests in flight across the client; <= 0 → DefaultMaxConcurrency
+}
+
+// NewHTTPClient builds a client with default Options. baseURL is GITLAB_URL
+// without trailing slash (a trailing slash MUST be tolerated). hc nil → a
+// default client. hc is copied, so the caller's client is not modified.
 func NewHTTPClient(baseURL, token string, hc *http.Client) *HTTPClient {
+	return NewHTTPClientWithOptions(baseURL, token, hc, Options{})
+}
+
+// NewHTTPClientWithOptions is NewHTTPClient with explicit Options. When hc
+// has no Transport, one that keeps enough idle connections for
+// MaxConcurrency requests is used.
+func NewHTTPClientWithOptions(baseURL, token string, hc *http.Client, opts Options) *HTTPClient {
+	limit := opts.MaxConcurrency
+	if limit <= 0 {
+		limit = DefaultMaxConcurrency
+	}
 	client := http.Client{}
 	if hc != nil {
 		client = *hc
 	}
+	if client.Transport == nil {
+		client.Transport = pooledTransport(limit)
+	}
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &HTTPClient{baseURL: strings.TrimRight(baseURL, "/"), token: token, http: &client}
+	return &HTTPClient{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		token:   token,
+		http:    &client,
+		slots:   make(chan struct{}, limit),
+	}
+}
+
+// pooledTransport avoids reconnecting for every request: Go's default keeps
+// only 2 idle connections per host.
+func pooledTransport(limit int) *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.MaxIdleConnsPerHost = max(32, limit)
+	t.MaxIdleConns = max(64, limit)
+	return t
 }
 
 var _ Client = (*HTTPClient)(nil)
@@ -227,9 +272,13 @@ func (c *HTTPClient) fillReports(ctx context.Context, group string, batch []Iter
 		return err
 	}
 	for k := range batch {
-		if node := data[fmt.Sprintf("i%d", k)]; node != nil {
-			batch[k].Report = node.Report
+		node := data[fmt.Sprintf("i%d", k)]
+		// A null node (iteration deleted since the list, or not readable via
+		// its own group) is a failed read, so §4.4 keeps the group.
+		if node == nil {
+			return fmt.Errorf("GitLab returned no data for iteration %s (deleted, or not readable with this token)", batch[k].ID)
 		}
+		batch[k].Report = node.Report
 	}
 	return nil
 }
@@ -276,13 +325,62 @@ type gqlResponse struct {
 	Errors []gqlError      `json:"errors"`
 }
 
-// do POSTs one GraphQL request and decodes `data` into out. Errors carry
-// GitLab's own message verbatim whenever GitLab supplied one (§14.3).
+// Retry policy for overloaded or rate-limiting GitLab responses.
+const (
+	MaxAttempts  = 3
+	MaxRetryWait = 10 * time.Second
+	retryBackoff = 300 * time.Millisecond
+)
+
+// busyError is a retryable GitLab answer (429/502/503/504). Error() is the
+// message the caller sees if retries run out.
+type busyError struct {
+	msg        string
+	retryAfter time.Duration
+	hasHint    bool
+}
+
+func (e *busyError) Error() string { return e.msg }
+
+// wait is how long to pause before the next attempt (attempt counts from 1).
+func (e *busyError) wait(attempt int) time.Duration {
+	if e.hasHint {
+		return min(e.retryAfter, MaxRetryWait)
+	}
+	backoff := float64(retryBackoff<<(attempt-1)) * (0.5 + rand.Float64())
+	return min(time.Duration(backoff), MaxRetryWait)
+}
+
+// do POSTs one GraphQL request (retrying while GitLab is busy) and decodes
+// `data` into out. Errors carry GitLab's own message verbatim whenever GitLab
+// supplied one (§14.3).
 func (c *HTTPClient) do(ctx context.Context, query string, vars map[string]any, out any) error {
 	payload, err := json.Marshal(map[string]any{"query": query, "variables": vars})
 	if err != nil {
 		return err
 	}
+	for attempt := 1; ; attempt++ {
+		err := c.attempt(ctx, payload, out)
+		var busy *busyError
+		if !errors.As(err, &busy) || attempt == MaxAttempts {
+			return err
+		}
+		select {
+		case <-time.After(busy.wait(attempt)):
+		case <-ctx.Done():
+			return err
+		}
+	}
+}
+
+func (c *HTTPClient) attempt(ctx context.Context, payload []byte, out any) error {
+	select {
+	case c.slots <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-c.slots }()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/graphql", bytes.NewReader(payload))
 	if err != nil {
 		return err
@@ -301,15 +399,15 @@ func (c *HTTPClient) do(ctx context.Context, query string, vars map[string]any, 
 		return err
 	}
 
-	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+	switch {
+	case resp.StatusCode >= 300 && resp.StatusCode < 400:
 		return fmt.Errorf("GitLab redirected the request to %q; set GITLAB_URL to GitLab's canonical address (redirects are not followed)",
 			resp.Header.Get("Location"))
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		if msg := upstreamMessage(body); msg != "" {
-			return errors.New(msg)
-		}
-		return fmt.Errorf("GitLab responded %s", resp.Status)
+	case isBusy(resp.StatusCode):
+		after, ok := parseRetryAfter(resp.Header.Get("Retry-After"), time.Now())
+		return &busyError{msg: statusMessage(resp, body), retryAfter: after, hasHint: ok}
+	case resp.StatusCode < 200 || resp.StatusCode > 299:
+		return errors.New(statusMessage(resp, body))
 	}
 
 	var gr gqlResponse
@@ -327,6 +425,36 @@ func (c *HTTPClient) do(ctx context.Context, query string, vars map[string]any, 
 		return fmt.Errorf("GitLab returned an unreadable response: %w", err)
 	}
 	return nil
+}
+
+func isBusy(status int) bool {
+	switch status {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// statusMessage is GitLab's explanation of a non-2xx answer, else its status.
+func statusMessage(resp *http.Response, body []byte) string {
+	if msg := upstreamMessage(body); msg != "" {
+		return msg
+	}
+	return "GitLab responded " + resp.Status
+}
+
+// parseRetryAfter reads a Retry-After header: delay-seconds or an HTTP date.
+func parseRetryAfter(v string, now time.Time) (time.Duration, bool) {
+	if v == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs >= 0 {
+		return time.Duration(secs) * time.Second, true
+	}
+	if at, err := http.ParseTime(v); err == nil {
+		return max(at.Sub(now), 0), true
+	}
+	return 0, false
 }
 
 func joinMessages(errs []gqlError) string {

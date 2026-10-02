@@ -3,8 +3,11 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -15,6 +18,9 @@ type Config struct {
 	Port        string // default "8080"
 	Mock        bool   // GITLAB_MOCK=1 → serve fixture data instead of a real GitLab
 	StaticDir   string // optional: serve the built SPA from here
+
+	MaxConcurrency int           // GITLAB_MAX_CONCURRENCY: GitLab requests in flight; 0 → gitlab default (12)
+	ReadTimeout    time.Duration // GITLAB_READ_TIMEOUT: deadline of one GitLab read; 0 → service default (90s)
 }
 
 func Load() (Config, error) {
@@ -26,6 +32,13 @@ func Load() (Config, error) {
 		Port:        getenv("PORT", "8080"),
 		Mock:        os.Getenv("GITLAB_MOCK") == "1",
 		StaticDir:   os.Getenv("STATIC_DIR"),
+	}
+	var err error
+	if c.MaxConcurrency, err = positiveInt("GITLAB_MAX_CONCURRENCY"); err != nil {
+		return c, err
+	}
+	if c.ReadTimeout, err = duration("GITLAB_READ_TIMEOUT"); err != nil {
+		return c, err
 	}
 	if c.RootGroup == "" {
 		return c, errors.New("ROOT_GROUP is required")
@@ -41,4 +54,31 @@ func getenv(k, def string) string {
 		return v
 	}
 	return def
+}
+
+func positiveInt(k string) (int, error) {
+	v := os.Getenv(k)
+	if v == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer, got %q", k, v)
+	}
+	return n, nil
+}
+
+// duration accepts a Go duration ("90s", "2m") or a number of seconds ("90").
+func duration(k string) (time.Duration, error) {
+	v := os.Getenv(k)
+	if v == "" {
+		return 0, nil
+	}
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return time.Duration(secs) * time.Second, nil
+	}
+	if d, err := time.ParseDuration(v); err == nil && d > 0 {
+		return d, nil
+	}
+	return 0, fmt.Errorf("%s must be a positive duration such as 90s, got %q", k, v)
 }

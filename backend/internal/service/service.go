@@ -19,11 +19,17 @@
 //     (never the iteration list, never the group list);
 //   - Iterations has NO refresh: it is always served through the cache.
 //
+// Every GitLab read (one cache fetch) runs under its own deadline,
+// Options.ReadTimeout; running out is a failed read and is not remembered.
+//
 // Errors are returned unwrapped (Error() verbatim from the client).
 package service
 
 import (
+	"cmp"
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -41,12 +47,18 @@ type Options struct {
 	Now           func() time.Time // cache clock; nil → time.Now
 	TTL           time.Duration    // 0 → cache.DefaultTTL (5 min)
 	CacheCapacity int              // per cache; 0 → cache.DefaultCapacity
+	ReadTimeout   time.Duration    // deadline of one GitLab read; 0 → DefaultReadTimeout
 }
+
+// DefaultReadTimeout bounds one logical GitLab read (e.g. a group's ~50
+// report requests), so a struggling GitLab cannot hold it open indefinitely.
+const DefaultReadTimeout = 90 * time.Second
 
 // Service is safe for concurrent use.
 type Service struct {
 	client      gitlab.Client
 	root        string
+	readTimeout time.Duration
 	descendants *cache.Cache[[]gitlab.Group]
 	iterations  *cache.Cache[[]api.Iteration]
 	reports     *cache.Cache[[]api.IterationReport]
@@ -57,6 +69,7 @@ func New(client gitlab.Client, opts Options) *Service {
 	return &Service{
 		client:      client,
 		root:        strings.Trim(opts.RootGroup, "/"),
+		readTimeout: cmp.Or(opts.ReadTimeout, DefaultReadTimeout),
 		descendants: cache.New[[]gitlab.Group](opts.TTL, opts.CacheCapacity, opts.Now),
 		iterations:  cache.New[[]api.Iteration](opts.TTL, opts.CacheCapacity, opts.Now),
 		reports:     cache.New[[]api.IterationReport](opts.TTL, opts.CacheCapacity, opts.Now),
@@ -72,9 +85,9 @@ var _ api.Service = (*Service)(nil)
 // Never returns nil on success.
 func (s *Service) Groups(ctx context.Context, refresh bool) ([]api.GroupCard, error) {
 	descendants, err := s.descendants.Get(ctx, cache.Key("descendants", s.root), refresh,
-		func(ctx context.Context) ([]gitlab.Group, error) {
+		within(s.readTimeout, func(ctx context.Context) ([]gitlab.Group, error) {
 			return s.client.DescendantGroups(ctx, s.root)
-		})
+		}))
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +109,7 @@ func (s *Service) Groups(ctx context.Context, refresh bool) ([]api.GroupCard, er
 // success.
 func (s *Service) Iterations(ctx context.Context, group string) ([]api.Iteration, error) {
 	its, err := s.iterations.Get(ctx, cache.Key("iterations", group), false,
-		func(ctx context.Context) ([]api.Iteration, error) {
+		within(s.readTimeout, func(ctx context.Context) ([]api.Iteration, error) {
 			raw, err := s.client.Iterations(ctx, group)
 			if err != nil {
 				return nil, err
@@ -107,7 +120,7 @@ func (s *Service) Iterations(ctx context.Context, group string) ([]api.Iteration
 			}
 			iterations.Sort(out)
 			return out, nil
-		})
+		}))
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +142,7 @@ func (s *Service) Reports(ctx context.Context, group string, refresh bool) ([]ap
 // the §4.4 data check. The returned slice is the remembered one: read only.
 func (s *Service) cachedReports(ctx context.Context, group string, refresh bool) ([]api.IterationReport, error) {
 	return s.reports.Get(ctx, cache.Key("reports", group), refresh,
-		func(ctx context.Context) ([]api.IterationReport, error) {
+		within(s.readTimeout, func(ctx context.Context) ([]api.IterationReport, error) {
 			raw, err := s.client.Reports(ctx, group)
 			if err != nil {
 				return nil, err
@@ -137,5 +150,20 @@ func (s *Service) cachedReports(ctx context.Context, group string, refresh bool)
 			out := reports.Normalize(raw)
 			iterations.SortReports(out)
 			return out, nil
-		})
+		}))
+}
+
+// within runs fetch under a deadline of d and reports an expired deadline in
+// words, since GitLab itself said nothing.
+func within[V any](d time.Duration, fetch func(context.Context) (V, error)) func(context.Context) (V, error) {
+	return func(ctx context.Context) (V, error) {
+		ctx, cancel := context.WithTimeout(ctx, d)
+		defer cancel()
+		v, err := fetch(ctx)
+		if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			var zero V
+			return zero, fmt.Errorf("GitLab did not answer within %s", d)
+		}
+		return v, err
+	}
 }

@@ -23,7 +23,8 @@ import (
 	"heimdall/internal/service"
 )
 
-// gitlabTimeout bounds one GraphQL round trip.
+// gitlabTimeout bounds one GraphQL round trip (a whole read is bounded by
+// GITLAB_READ_TIMEOUT).
 const gitlabTimeout = 25 * time.Second
 
 func main() {
@@ -32,7 +33,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	svc := service.New(newClient(cfg), service.Options{RootGroup: cfg.RootGroup})
+	svc := service.New(newClient(cfg), service.Options{RootGroup: cfg.RootGroup, ReadTimeout: cfg.ReadTimeout})
 	router := api.NewRouter(api.AppConfig{GroupTerm: cfg.GroupTerm, RootGroup: cfg.RootGroup}, svc)
 	router.NoRoute(fallback(cfg.StaticDir))
 
@@ -51,7 +52,8 @@ func newClient(cfg config.Config) gitlab.Client {
 	if cfg.Mock {
 		return mock.Fixture(time.Now().UTC())
 	}
-	return gitlab.NewHTTPClient(cfg.GitLabURL, cfg.GitLabToken, &http.Client{Timeout: gitlabTimeout})
+	return gitlab.NewHTTPClientWithOptions(cfg.GitLabURL, cfg.GitLabToken, &http.Client{Timeout: gitlabTimeout},
+		gitlab.Options{MaxConcurrency: cfg.MaxConcurrency})
 }
 
 // logStartup describes the configuration; the token is never logged.
