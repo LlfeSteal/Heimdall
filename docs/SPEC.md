@@ -1239,6 +1239,18 @@ So for §15.3: `8.8 %` → **good**, `+2.5 pts` → **caution**, `50 %` → **ca
   batching two per request is rejected), with bounded concurrency. Any failed request fails the whole read
   (never cached). Iterations older than the newest 50 have no report entry; the chart region shows
   `No burnup data found for this iteration (check permissions or format).` for them.
+- Recorded deviations from the body (decided by the orchestrator, see docs/conformance/*):
+  - Ledger #10 is NOT reproduced: all date arithmetic (today, axis days, calendar-day differences) is UTC,
+    so the axis never shifts by a day for users far from UTC. Ledger #9 (today = UTC day) still holds.
+  - §14.1 "oldest dropped first" is implemented as least-recently-used eviction (a cache hit counts as a use;
+    hits never extend the 5-minute TTL).
+  - §14.1 forced refresh: a refresh that arrives while an identical read is already in flight joins that
+    in-flight read (which is by definition fresh) instead of issuing a duplicate GitLab request.
+  - Ledger #11 CHANGED (user decision, 2026-10-02): annotation offsets stay in workload units (§10.5 stacking
+    unchanged), but the burndown y-axis widens to include every label's band, so labels never leave the chart —
+    even on crowded iterations. The "labels vanish off the top" behaviour no longer exists.
+  - Ledger #18 (≤ 5 minutes stale) is guaranteed end-to-end: the browser does not add its own freshness window
+    on top of the backend's.
 - GitLab GraphQL mapping: `burnupTimeSeries { date scopeWeight completedWeight }` → committed = scopeWeight,
   delivered = completedWeight, remaining = committed − delivered (not clamped).
   `stats { total complete incomplete { count weight } }` → committed / delivered / inProgress.
