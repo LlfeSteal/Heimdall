@@ -15,8 +15,8 @@
     "ghcr.io/anthropics/devcontainer-features/claude-code:1": {}
   },
   "remoteUser": "vscode",
-  // 5173: Vite dev server. 8080: Go/Gin API. 80: docker compose nginx.
-  "forwardPorts": [5173, 8080, 80],
+  // 5173: Vite dev server. 8080: Go/Gin API. 8090: docker compose nginx (HEIMDALL_PORT).
+  "forwardPorts": [5173, 8080, 8090],
   "portsAttributes": {
     "5173": {
       "label": "Frontend — dev (Vite)",
@@ -26,7 +26,7 @@
       "label": "Backend — API Go",
       "onAutoForward": "silent"
     },
-    "80": {
+    "8090": {
       "label": "Docker compose — nginx",
       "onAutoForward": "silent"
     }

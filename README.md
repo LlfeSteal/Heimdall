@@ -50,12 +50,12 @@ cd frontend && npm run e2e    # Playwright, starts the mock backend + Vite itsel
 ## Docker Compose
 
 `docker-compose.yml` runs two containers: `backend` (the Go API, internal port 8080, health-checked on
-`/api/health`) and `frontend` (nginx on port **80**, serving the built SPA and proxying `/api/` to the
+`/api/health`) and `frontend` (nginx, published on host port **8090** — override with `HEIMDALL_PORT`, serving the built SPA and proxying `/api/` to the
 backend).
 
 ```sh
 # fixture data, no GitLab needed
-GITLAB_MOCK=1 docker compose up -d --build      # http://localhost/
+GITLAB_MOCK=1 docker compose up -d --build      # http://localhost:8090/
 
 # real GitLab: configure .env first
 cp .env.example .env && $EDITOR .env
