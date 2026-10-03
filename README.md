@@ -39,16 +39,13 @@ cd frontend && npm install && npm run dev      # http://localhost:5173
 
 Against a real GitLab, replace `GITLAB_MOCK=1` with `GITLAB_URL=… GITLAB_TOKEN=…` and your `ROOT_GROUP`.
 
-The `Makefile` wraps the same commands: `make dev-backend`, `make dev-frontend`.
-
 ## Tests
 
 ```sh
 cd backend && GOFLAGS=-buildvcs=false go test ./...
 cd frontend && npm test
+cd frontend && npm run e2e    # Playwright, starts the mock backend + Vite itself
 ```
-
-or `make test` for both.
 
 ## Docker Compose
 
@@ -62,9 +59,9 @@ GITLAB_MOCK=1 docker compose up -d --build      # http://localhost/
 
 # real GitLab: configure .env first
 cp .env.example .env && $EDITOR .env
-docker compose up -d --build                    # or: make up
+docker compose up -d --build
 
-docker compose down                             # or: make down
+docker compose down
 ```
 
 Variables exported in the shell override `.env`.
