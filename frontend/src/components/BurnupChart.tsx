@@ -9,7 +9,7 @@ import type { BurnupModel } from '../domain/curve'
 import { todayUtc } from '../domain/dates'
 import { buildBurnupModel } from '../domain/model'
 import { S } from '../strings'
-import { ACCENT, AMBER, DASH, GREEN, GREY, NEUTRAL, pointClickHandler, tint } from './chartSetup'
+import { ACCENT, AMBER, DASH, GREEN, GREY, LEGEND, NEUTRAL, pointClickHandler, tint } from './chartSetup'
 
 interface Props {
   iteration: IterationReport
@@ -36,7 +36,7 @@ export function BurnupChart({ iteration, annotations, onPointClick }: Props) {
 
   return (
     <div className="chart-canvas">
-      <Line data={data} options={options} />
+      <Line data={data} options={options} role="img" aria-label={S.burnupTitle} />
     </div>
   )
 }
@@ -52,6 +52,7 @@ function burnupData(m: BurnupModel): ChartData<'line', (number | null)[], string
         backgroundColor: tint(GREEN, 0.14),
         pointBackgroundColor: GREEN,
         fill: 'origin',
+        pointStyle: 'circle',
         tension: 0.3,
         pointRadius: 3,
         pointHoverRadius: 5,
@@ -63,7 +64,9 @@ function burnupData(m: BurnupModel): ChartData<'line', (number | null)[], string
         backgroundColor: NEUTRAL,
         borderDash: DASH,
         borderWidth: 1.5,
+        pointStyle: 'line', // dashed swatch in the legend
         pointRadius: 0,
+        pointHoverRadius: 0,
         fill: false,
       },
       {
@@ -73,7 +76,9 @@ function burnupData(m: BurnupModel): ChartData<'line', (number | null)[], string
         backgroundColor: GREY,
         borderDash: DASH,
         borderWidth: 1.5,
+        pointStyle: 'line', // dashed swatch in the legend
         pointRadius: 0,
+        pointHoverRadius: 0,
         fill: false,
       },
       {
@@ -83,7 +88,9 @@ function burnupData(m: BurnupModel): ChartData<'line', (number | null)[], string
         backgroundColor: ACCENT,
         borderDash: DASH,
         borderWidth: 2,
+        pointStyle: 'line',
         pointRadius: 0,
+        pointHoverRadius: 0,
         spanGaps: true,
         fill: false,
       },
@@ -116,10 +123,10 @@ function burnupOptions(
     animation: false,
     interaction: { mode: 'index', intersect: false },
     scales: { y: { beginAtZero: true } },
-    onClick: pointClickHandler(m.axis, onPointClick),
+    onClick: pointClickHandler(m.axis, m.completed, onPointClick),
     plugins: {
       title: { display: true, text: S.burnupTitle },
-      legend: { position: 'bottom' },
+      legend: LEGEND,
       annotation: { annotations: markers },
     },
   }

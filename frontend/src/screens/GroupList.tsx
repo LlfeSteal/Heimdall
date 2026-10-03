@@ -25,7 +25,7 @@ export function GroupList({ config, gen, onRefresh, onSelect }: Props) {
       </header>
       <main className="group-list">
         {config.isError || groups.isError ? (
-          <section className="state-box" data-tone="poor">
+          <section className="state-box" role="alert">
             <h2>{S.groupLoadingError}</h2>
             <p className="error-text">{(config.error ?? groups.error)?.message}</p>
             <button type="button" onClick={retry}>

@@ -43,10 +43,37 @@ export function tint(hex: string, alpha: number): string {
 
 export const DASH = [6, 4]
 
-/** Point-click handler shared by both views: Chart.js hands the active elements; the first one's index is the date. */
-export function pointClickHandler(axis: readonly string[], onPointClick: (date: string) => void) {
+/**
+ * Legend swatches drawn as what they stand for: a dashed series as a dashed line, a filled series as a box
+ * (instead of Chart.js's solid block for every series).
+ */
+export const LEGEND = {
+  position: 'bottom',
+  labels: {
+    usePointStyle: true,
+    pointStyleWidth: 28,
+    generateLabels: (chart: Chart) =>
+      Chart.defaults.plugins.legend.labels.generateLabels(chart).map((item) => {
+        // With usePointStyle Chart.js styles the swatch from a point, which carries no dash: take the series'.
+        const dash = (chart.data.datasets[item.datasetIndex ?? 0] as { borderDash?: number[] }).borderDash ?? []
+        return { ...item, lineDash: dash, pointStyle: dash.length ? ('line' as const) : ('rect' as const) }
+      }),
+  },
+} as const
+
+/**
+ * Point-click handler shared by both views. Chart.js hands the active elements (nearest axis index); only an
+ * index where the main series has a recorded value opens the dialogue, so a click on empty plot space after
+ * the last point or in a gap does nothing (§3.6 "click a point").
+ */
+export function pointClickHandler(
+  axis: readonly string[],
+  series: readonly (number | null)[],
+  onPointClick: (date: string) => void,
+) {
   return (_event: unknown, elements: readonly { index: number }[]) => {
-    const first = elements[0]
-    if (first && axis[first.index] !== undefined) onPointClick(axis[first.index])
+    const index = elements[0]?.index
+    if (index === undefined || series[index] === null || series[index] === undefined) return
+    onPointClick(axis[index])
   }
 }

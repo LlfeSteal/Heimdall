@@ -327,3 +327,31 @@ docs and not in SPEC (domain res. 4; backend res. 7, and res. 6 to a lesser degr
 5. **Ledger #10 (DEVIATION, low, documentation only):** add an Implementation note to `SPEC.md`: "All
    calendar arithmetic is UTC, so ledger #10's local/UTC off-by-one is deliberately not reproduced." In the
    same edit, record backend res. 7 (LRU, capacity 256, TTL not extended by hits).
+
+---
+
+## Wave-3 fixes (builder)
+
+| Item | Fix | Where | Test |
+|---|---|---|---|
+| D1 (ledger #11 changed) | The §10.5 stacking offsets stay in workload units, and `yValue` stays at the point, so the dashed callout still runs back to it. The box grows away from its point (`position.y` = `end` above / `start` below, by `verticalPushSign` on the plotted data range). Its pixel offset still comes from the y scale. The y axis's `afterDataLimits` calls `widenRangeForCallouts`: a fixed-point widening so every band (anchor ± its pixel height converted to units) fits the plot. Horizontal push is ≥ 10 px or 4 % of the chart width, then clamped inside the plot (`calloutLeft`). | components/calloutLayout.ts; BurndownChart.tsx | CW01–CW03, CX01–CX02, SW01–SW02; e2e E-V4 (no `test.fail`), new E-V5 (15 notes on one date + 3 low ones) |
+| S-58 | Callout content = `calloutLines(text)`: the text's own lines, each capped at 25 characters (ellipsis), ≤ 3 lines (ellipsis on the 3rd). Font 10 px × 1.3 line height and padding 7/5 reproduce `annotationLabelSize`, so the drawn box equals the estimate the stacking used. `width`/`height` are **not** passed: chartjs-plugin-annotation honours them only for image/canvas content. I truncated rather than wrapped long lines: wrapping would make the box taller than the estimate and break the stacking's no-overlap guarantee. | calloutLayout.ts; BurndownChart.tsx | CL01–CL04, SW03; E-V5 width ≤ 175 px |
+| S-35 / #18 | `staleTime: 0` for every data query (config: `Infinity`, it never changes). Reports are keyed `['reports', path, entry, gen]`, so each group entry is one fresh read. Switching iteration keeps the same mounted key, so there is no re-read. Groups re-read when the list is shown again; `refresh=1` is sent only for a Refresh/Retry key that has no data yet. `useForgetRefreshedReports` is removed (no longer needed). | api/queries.ts; IterationReview.tsx | SW07; SR13, SR21–SR23, E-R6/E-R7 still green |
+| S-44 | The timer runs while `iterations.isPending \|\| (closed.length > 0 && reports.isLoading)`. Its key is `path\|entry\|gen`. The timeout is checked first, so it stays sticky even once the iterations arrive. | IterationReview.tsx | SW06; SR20 still green |
+| S-60 | `pointClickHandler(axis, series, …)` ignores an index whose main series value is null: burndown Remaining, burnup Completed. | chartSetup.ts | SW04, SW05 |
+| D2 | Legend `usePointStyle` + `generateLabels`: dashed series show as a dashed line (dash taken from the dataset, because Chart.js styles a point-style swatch from the point, which has no dash). Filled series show as a box. | chartSetup.ts | SW08; screenshots 02/03 |
+| D3 | `.category` no longer uppercases. | App.css | screenshot 01 |
+| D4 | `.iteration-dates { white-space: nowrap }`; the range spans the full row and the badge sits on the title row. | App.css | screenshot 06 (1024 px) |
+| Quality | No more `as IterationReport[]` cast: the iterations are mapped to the reports shape (`report: null`) before `closedForScore`. Removed the dead `useForgetRefreshedReports` and the `reportsKey` export. | IterationReview.tsx; queries.ts | — |
+| A11y | The textarea is focused whenever the dialogue opens on a point or annotation. Its label is `S.textPlaceholder`. The view switch is `role="group"` with a label. Group-list and rail errors have `role="alert"`. The chart canvases are `role="img"` with the chart title as label. | AnnotationDialog.tsx; IterationReview.tsx; GroupList.tsx; IterationChooser.tsx; Burndown/BurnupChart.tsx | SW08, SW09 |
+| Bundle | Chart.js, the annotation plugin and react-chartjs-2 go into a separate `charts` chunk (221 kB); the app chunk is 282 kB. There is no size warning any more. | vite.config.ts | `npm run build` |
+
+**Runs:** `npx vitest run`: 23 files, 390 tests passed (372 existing + 18 new). `tsc -b --noEmit`: clean. `oxlint src`:
+0 warnings outside the test helper `chartMock.tsx`. `npm run build`: OK. `npm run e2e`: **24/24 passed**
+(E-V4 without `test.fail`, plus E-V5).
+
+**Open (needs a domain/spec decision):** the §10.5 stacking compares label heights (pixel estimates) with
+workload values. When an iteration has many notes on one date the axis widens a lot (E-V5: 0–50 becomes about
+−200…800). Workload-unit gaps then shrink to a few pixels, so stacked boxes overlap each other on screen,
+although none is clipped. Pixel-true stacking would need a change in `domain/annotationGeometry.ts`, which I
+did not make.

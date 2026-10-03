@@ -1,5 +1,5 @@
 // §3.3 annotation dialogue, shown directly under the chart. State and rules live in useAnnotations.
-import { useId } from 'react'
+import { useEffect, useId, useRef } from 'react'
 import type { AnnotationType } from '../annotations/model'
 import type { DialogueView } from '../annotations/useAnnotations'
 import { S } from '../strings'
@@ -22,6 +22,11 @@ export function AnnotationDialog({ dialogue, canSave, onText, onType, onCancel, 
   const headingId = useId()
   const typeId = useId()
   const editing = dialogue.mode === 'edit'
+  const textRef = useRef<HTMLTextAreaElement>(null)
+  // Focus the text whenever the dialogue opens on another point or annotation (keyboard users included).
+  useEffect(() => {
+    textRef.current?.focus()
+  }, [dialogue.date, dialogue.annotationId])
   return (
     <section className="annotation-dialog" data-testid="annotation-dialog" aria-labelledby={headingId}>
       <h3 id={headingId}>{editing ? S.editAnnotation : S.addAnnotation}</h3>
@@ -45,10 +50,11 @@ export function AnnotationDialog({ dialogue, canSave, onText, onType, onCancel, 
       </div>
       {/* Not a form: Enter inserts a newline and never submits (§3.3). */}
       <textarea
+        ref={textRef}
         rows={3}
         value={dialogue.text}
         placeholder={S.textPlaceholder}
-        aria-labelledby={headingId}
+        aria-label={S.textPlaceholder}
         required
         onChange={(e) => onText(e.target.value)}
       />

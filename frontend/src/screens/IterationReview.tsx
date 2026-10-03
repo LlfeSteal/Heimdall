@@ -1,8 +1,8 @@
 // Screen 2 — iteration review (SPEC §3.2): header, iteration rail, chart card, annotations rail.
 // Owns the selection, the view, the reports refresh generation and the annotation lifecycle; keyed by the
 // entry counter so (re-)entering a group starts clean and leaving clears everything (§10.3).
-import { type UseQueryResult, useQueryClient } from '@tanstack/react-query'
-import { type ReactNode, useEffect, useRef, useState } from 'react'
+import type { UseQueryResult } from '@tanstack/react-query'
+import { type ReactNode, useState } from 'react'
 import type { GroupTile, Iteration, IterationReport } from '../api/types'
 import { useIterations, useReports } from '../api/queries'
 import { type UseAnnotationsResult, useAnnotations } from '../annotations/useAnnotations'
@@ -21,7 +21,7 @@ import { useTimedOut } from './useTimedOut'
 type View = 'burndown' | 'burnup'
 
 interface Props {
-  /** Group-entry counter: part of the iterations query key so every entry re-reads the list (§14.2). */
+  /** Group-entry counter: part of the iterations / reports query keys so every entry re-reads (§14.2). */
   entry: number
   group: GroupTile
   term: string
@@ -38,14 +38,15 @@ export function IterationReview({ entry, group, term, onBack }: Props) {
   const list = iterations.data ?? []
   // §5.3 / ledger #6: auto-selection scans the UNFILTERED list.
   const selected = list.find((it) => it.id === choice) ?? list.find((it) => it.state !== 'upcoming') ?? null
-  // closedForScore only reads `state`, so the plain iteration list can feed it (§11.2: no read when empty).
-  const closed = closedForScore(list as IterationReport[])
-  const reports = useReports(path, gen, selected !== null || closed.length > 0)
-  const timedOut = useTimedOut(`${path}|${gen}`, reports.isLoading)
-  const score = scoreState(iterations, closed, reports, timedOut)
+  // §11.2: the closed set comes from the iteration list, so "nothing closed ⇒ no read" holds.
+  const closedIds = closedForScore(list.map(asScoreCandidate)).map((it) => it.id)
+  const reports = useReports(path, entry, gen, selected !== null || closedIds.length > 0)
+  // §11.3: the 30 s budget covers the whole score computation — the iterations read and the reports read.
+  const scorePending = iterations.isPending || (closedIds.length > 0 && reports.isLoading)
+  const timedOut = useTimedOut(`${path}|${entry}|${gen}`, scorePending)
+  const score = scoreState(iterations, closedIds, reports, timedOut)
 
   const ann = useAnnotations({ groupPath: path, iterationId: selected?.iid ?? null })
-  useForgetRefreshedReports(path, gen)
 
   const scorePanel = <ScorePanel state={score} />
   return (
@@ -90,39 +91,25 @@ export function IterationReview({ entry, group, term, onBack }: Props) {
   )
 }
 
+/** An iteration in the shape closedForScore takes; it only looks at `state` (no report is known yet). */
+const asScoreCandidate = (it: Iteration): IterationReport => ({ ...it, report: null, reportError: null })
+
 function scoreState(
   iterations: UseQueryResult<Iteration[]>,
-  closed: Iteration[],
+  closedIds: string[],
   reports: UseQueryResult<IterationReport[]>,
   timedOut: boolean,
 ): ScoreState {
+  // Sticky for this request: whatever arrives later is discarded (§11.3, ledger #21).
+  if (timedOut) return { kind: 'timeout' }
   if (iterations.isPending) return { kind: 'loading' }
   if (iterations.isError) return { kind: 'error', message: iterations.error.message }
-  if (closed.length === 0) return { kind: 'none' }
-  if (timedOut) return { kind: 'timeout' }
+  if (closedIds.length === 0) return { kind: 'none' }
   if (reports.isPending) return { kind: 'loading' }
   if (reports.isError) return { kind: 'error', message: reports.error.message }
   const byId = new Map(reports.data.map((r) => [r.id, r]))
-  const score = predictability(closed.flatMap((it) => byId.get(it.id) ?? []))
+  const score = predictability(closedIds.flatMap((id) => byId.get(id) ?? []))
   return score === NO_SCORE ? { kind: 'none' } : { kind: 'ready', score: presentScore(score) }
-}
-
-/**
- * After a review `Refresh`, drop this group's cached report reads when leaving, so re-entering does not show
- * the pre-refresh answer from the browser cache (the backend's own cache already holds the fresh one).
- */
-function useForgetRefreshedReports(path: string, gen: number) {
-  const queryClient = useQueryClient()
-  const genRef = useRef(gen)
-  useEffect(() => {
-    genRef.current = gen
-  }, [gen])
-  useEffect(
-    () => () => {
-      if (genRef.current > 0) queryClient.removeQueries({ queryKey: ['reports', path] })
-    },
-    [queryClient, path],
-  )
 }
 
 interface ChartCardProps {
@@ -178,7 +165,7 @@ function ChartBody({ selected, reports, view, onView, ann }: Omit<ChartCardProps
   return (
     <>
       <div className="chart-toolbar">
-        <div className="view-switch" role="group">
+        <div className="view-switch" role="group" aria-label={`${S.viewBurndown} / ${S.viewBurnup}`}>
           <button type="button" aria-pressed={view === 'burndown'} onClick={() => onView('burndown')}>
             {S.viewBurndown}
           </button>

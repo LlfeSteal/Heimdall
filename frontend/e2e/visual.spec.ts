@@ -88,11 +88,9 @@ test.describe('E-V real-canvas checks', () => {
     await shot(page, '06-review-1024')
   })
 
-  test('E-V4 [defect D1] a single annotation callout is drawn inside the plot (visible)', async ({ page, request }) => {
-    // §3.6 "Annotation text is drawn as a callout box anchored to its point"; §10.5 KNOWN BEHAVIOUR only expects
-    // labels to vanish on CROWDED iterations. With 20-workload-unit offsets on a ~50-point range, even a lone
-    // label in the upper or lower part of the range is pushed outside the chart area and clipped.
-    test.fail(true, 'D1: lone callouts are pushed outside the plot and clipped (BurndownChart workloadOffsetToPixels + clip)')
+  test('E-V4 lone annotation callouts are drawn entirely inside the plot (D1 fixed: the y axis widens)', async ({ page, request }) => {
+    // §3.6 "Annotation text is drawn as a callout box anchored to its point". Ledger #11 as changed on 2026-10-02:
+    // offsets stay in workload units, but the y axis widens so every label box stays inside the chart.
     const reports = await apiReports(request, ALPHA)
     const s6 = reports.find((r) => r.iid === '6')!
     const pts = s6.report!.series
@@ -105,13 +103,43 @@ test.describe('E-V real-canvas checks', () => {
     await selectIteration(page, 'Sprint 6')
     await expect(page.getByTestId('annotation-item')).toHaveCount(seeds.length)
     await chartSnapshot(page)
-    await shot(page, '04-callouts-clipped')
+    await shot(page, '04-callouts-visible')
     const { area, boxes } = await calloutBoxes(page)
     expect(boxes).toHaveLength(seeds.length)
-    // A callout counts as hidden when less than 90 % of its box lies inside the (clipped) plot area.
-    const visibleShare = (b: { y: number; y2: number }) =>
-      Math.max(0, Math.min(b.y2, area.bottom) - Math.max(b.y, area.top)) / (b.y2 - b.y)
-    const hidden = boxes.filter((b) => visibleShare(b) < 0.9).map((b) => String(b.content))
-    expect(hidden, 'callouts clipped away outside the plot area').toEqual([])
+    expect(outside(area, boxes), 'callout boxes reaching outside the plot area').toEqual([])
+  })
+
+  test('E-V5 crowded: 15 notes on one date and 3 on another — every callout box inside the plot', async ({ page, request }) => {
+    const reports = await apiReports(request, ALPHA)
+    const s6 = reports.find((r) => r.iid === '6')!
+    const pts = s6.report!.series
+    const first = pts[0].date
+    const last = pts[pts.length - 1].date
+    const seeds = [
+      ...Array.from({ length: 15 }, (_, k) => seedAnnotation(ALPHA, '6', first, `Crowded ${k}\nsecond line`, 'information', String(200 + k))),
+      ...Array.from({ length: 3 }, (_, k) => seedAnnotation(ALPHA, '6', last, `Low ${k} ${'long text '.repeat(6)}`, 'risk', String(300 + k))),
+    ]
+    await seedStorage(page, seeds)
+    await gotoGroupList(page)
+    await openCard(page, 'alpha')
+    await selectIteration(page, 'Sprint 6')
+    await expect(page.getByTestId('annotation-item')).toHaveCount(seeds.length)
+    await chartSnapshot(page)
+    await shot(page, '04b-callouts-crowded')
+    const { area, boxes } = await calloutBoxes(page)
+    expect(boxes).toHaveLength(seeds.length)
+    expect(outside(area, boxes), 'callout boxes reaching outside the plot area').toEqual([])
+    // §10.5 size: no box wider than the 25-character estimate (≈ 164 px) plus measuring slack.
+    for (const b of boxes) expect(b.x2 - b.x).toBeLessThanOrEqual(175)
   })
 })
+
+/** Boxes not lying entirely inside the plot area (1 px tolerance for anti-aliasing / rounding). */
+function outside(
+  area: { left: number; top: number; right: number; bottom: number },
+  boxes: { x: number; y: number; x2: number; y2: number; content: unknown }[],
+): string[] {
+  return boxes
+    .filter((b) => b.y < area.top - 1 || b.y2 > area.bottom + 1 || b.x < area.left - 1 || b.x2 > area.right + 1)
+    .map((b) => `${String(b.content)} [${b.x.toFixed(0)},${b.y.toFixed(0)} → ${b.x2.toFixed(0)},${b.y2.toFixed(0)}]`)
+}

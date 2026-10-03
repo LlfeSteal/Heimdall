@@ -26,7 +26,9 @@ export function IterationChooser({ term, iterations, selectedId, onSelect, onBac
           ))}
         </div>
       ) : iterations.isError ? (
-        <p className="error-text">{iterations.error.message}</p>
+        <p className="error-text" role="alert">
+          {iterations.error.message}
+        </p>
       ) : rows.length === 0 ? (
         <p className="muted">{S.noIterations(term)}</p>
       ) : (
