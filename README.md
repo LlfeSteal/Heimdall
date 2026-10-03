@@ -19,7 +19,7 @@ The backend is configured through environment variables. For `docker compose`, c
 | `ROOT_GROUP` | *(required; compose default `org/delivery`)* | Full path of the parent GitLab group, e.g. `my-org/delivery` |
 | `GITLAB_URL` | *(required unless `GITLAB_MOCK=1`)* | GitLab base URL, e.g. `https://gitlab.example.com` |
 | `GITLAB_TOKEN` | | Token sent as `Authorization: Bearer …`; read-only (`read_api`) scope is enough. Never sent to the browser or logged |
-| `GROUP_TERM` | `ART` | Noun used for groups in the UI |
+| `GROUP_TERM` | `Team` | Noun used for groups in the UI (singular; the UI appends "s") |
 | `GITLAB_MOCK` | `0` | `1` serves built-in fixture data (dates relative to today, UTC) instead of calling GitLab |
 | `PORT` | `8080` | API listen port (backend only) |
 | `STATIC_DIR` | | Optional: directory of a built SPA for the backend to serve itself (not used by compose) |

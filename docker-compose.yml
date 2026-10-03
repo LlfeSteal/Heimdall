@@ -12,7 +12,7 @@ services:
       GITLAB_URL: ${GITLAB_URL:-}
       GITLAB_TOKEN: ${GITLAB_TOKEN:-}
       ROOT_GROUP: ${ROOT_GROUP:-org/delivery}
-      GROUP_TERM: ${GROUP_TERM:-ART}
+      GROUP_TERM: ${GROUP_TERM:-Team}
       GITLAB_MOCK: ${GITLAB_MOCK:-0}
       GIN_MODE: release
     expose:

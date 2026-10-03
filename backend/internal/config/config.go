@@ -14,7 +14,7 @@ type Config struct {
 	GitLabURL   string // e.g. https://gitlab.example.com
 	GitLabToken string
 	RootGroup   string // required
-	GroupTerm   string // default "ART"
+	GroupTerm   string // default "Team"
 	Port        string // default "8080"
 	Mock        bool   // GITLAB_MOCK=1 → serve fixture data instead of a real GitLab
 	StaticDir   string // optional: serve the built SPA from here
@@ -28,7 +28,7 @@ func Load() (Config, error) {
 		GitLabURL:   strings.TrimRight(os.Getenv("GITLAB_URL"), "/"),
 		GitLabToken: os.Getenv("GITLAB_TOKEN"),
 		RootGroup:   strings.Trim(os.Getenv("ROOT_GROUP"), "/"),
-		GroupTerm:   getenv("GROUP_TERM", "ART"),
+		GroupTerm:   getenv("GROUP_TERM", "Team"),
 		Port:        getenv("PORT", "8080"),
 		Mock:        os.Getenv("GITLAB_MOCK") == "1",
 		StaticDir:   os.Getenv("STATIC_DIR"),

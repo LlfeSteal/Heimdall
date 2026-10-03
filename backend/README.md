@@ -10,7 +10,7 @@ Go 1.22 + Gin. Holds the GitLab token, reads GitLab over GraphQL only, caches an
 | `ROOT_GROUP` | *(required)* | Full path of the parent GitLab group, e.g. `my-org/delivery` (any case; surrounding `/` ignored) |
 | `GITLAB_URL` | *(required unless `GITLAB_MOCK=1`)* | GitLab's **canonical** base URL, e.g. `https://gitlab.example.com` (see below) |
 | `GITLAB_TOKEN` | | Token sent as `Authorization: Bearer …`; read-only scope is enough. Never exposed or logged |
-| `GROUP_TERM` | `ART` | Noun used for groups in the UI |
+| `GROUP_TERM` | `Team` | Noun used for groups in the UI (singular; the UI appends "s") |
 | `PORT` | `8080` | Listen port |
 | `GITLAB_MOCK` | | `1` serves built-in fixture data (dates relative to today, UTC) instead of GitLab |
 | `STATIC_DIR` | | Directory of the built SPA; non-`/api` paths are served from it, falling back to `index.html` |

@@ -1160,7 +1160,7 @@ Functional order; each stage is verifiable before the next, and none depends on 
 | Parameter | Default | Meaning |
 |---|---|---|
 | `ROOT_GROUP` | *(required)* | full path of the parent GitLab group, e.g. `my-org/delivery` |
-| `GROUP_TERM` | `ART` | the `{{GROUP_TERM}}` noun |
+| `GROUP_TERM` | `Team` | the `{{GROUP_TERM}}` noun (singular; changed from `ART` on 2026-10-03) |
 
 ### A.3 Which groups are offered, and how they are grouped
 1. Read **all** descendant groups of `ROOT_GROUP` (paginate until exhausted — no cap).
@@ -1201,7 +1201,7 @@ With `ROOT_GROUP = org/delivery`:
 | `org/delivery/gamma` | no, no children with data | hidden |
 | `org/delivery/delta` | read fails | card shown (fail open) |
 | `org/other/zeta` | yes | never offered (not under root) |
-Heading: `Available ARTs (3)` (alpha, beta, delta).
+Heading: `Available Teams (3)` (alpha, beta, delta).
 
 ### A.6 Colour-scale boundary resolution (§2.3 vs §15.3)
 §15.3's colour words contradict §2.3/§11.3. **Decision (user, 2026-10-01): §15.3 is authoritative for the
