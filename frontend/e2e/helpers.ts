@@ -32,14 +32,27 @@ export const TEAM1_REPORT_ERROR = 'Burnup chart could not be generated due to to
 export const DELTA_ERROR =
   "The resource that you are attempting to access does not exist or you don't have permission to perform this action"
 
+/** Light-appearance token values (src/index.css = STYLEGUIDE.md §2) the canvas is painted with. */
 export const COLOURS = {
-  BLUE: '#2563eb',
-  ACCENT: '#f97316',
-  GREY: '#9ca3af',
-  GREEN: '#16a34a',
-  NEUTRAL: '#6b7280',
-  RED: '#dc2626',
-  AMBER: '#f59e0b',
+  BLUE: '#007aff', // --remaining, --info
+  TODAY: '#ff3b30', // --today (red)
+  FORECAST: '#ff9500', // --forecast (orange)
+  GREY: '#aeaeb2', // --ideal (= --undated)
+  GREEN: '#34c759', // --tolerance, --delivered
+  NEUTRAL: 'rgba(60, 60, 67, 0.6)', // --total-scope (= --text-secondary)
+  RED: '#ff3b30', // --risk
+  CARD: '#ffffff', // --card
+}
+
+/** Dark-appearance values of the same tokens. */
+export const DARK_COLOURS = {
+  BLUE: '#0a84ff',
+  TODAY: '#ff453a',
+  FORECAST: '#ff9f0a',
+  GREY: '#636366',
+  GREEN: '#30d158',
+  RED: '#ff453a',
+  CARD: '#1c1c1e',
 }
 
 export const SHOT_DIR = process.env.E2E_SHOT_DIR ?? join(process.cwd(), 'test-results', 'screenshots')
@@ -89,7 +102,7 @@ export async function apiReports(request: APIRequestContext, group: string): Pro
 /** Fresh visit: empty localStorage unless `keepStorage`. Waits for the populated group list. */
 export async function gotoGroupList(page: Page) {
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: /^Available ARTs \(\d+\)$/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /^Available Teams \(\d+\)$/ })).toBeVisible()
 }
 
 export async function openCard(page: Page, segment: string) {
@@ -117,7 +130,7 @@ export interface ChartSnapshot {
   datasets: { label: string; data: (number | null)[]; borderColor: unknown; pointBackgroundColor: unknown; borderDash: unknown }[]
   /** Page-coordinate centre of each Remaining/Completed point (dataset 0). */
   points: { x: number; y: number; skip: boolean }[]
-  annotations: { id: string; type: string; content: unknown; drawTime: unknown; backgroundColor: unknown; yMin: unknown }[]
+  annotations: { id: string; type: string; content: unknown; drawTime: unknown; backgroundColor: unknown; borderColor: unknown; yMin: unknown }[]
   legend: string[]
   dataUrlLength: number
   /** Pixel y of `value` on the y scale, in page coordinates. */
@@ -173,6 +186,7 @@ export async function chartSnapshot(page: Page, yValues: number[] = []): Promise
         content: a.content,
         drawTime: a.drawTime,
         backgroundColor: a.backgroundColor,
+        borderColor: a.borderColor,
         yMin: a.yMin,
       })),
       legend: (chart.legend?.legendItems ?? []).map((i: { text: string }) => i.text),
@@ -282,4 +296,36 @@ export function seedAnnotation(groupPath: string, iterationId: string, date: str
 export async function seedStorage(page: Page, list: unknown[]) {
   await page.goto('/')
   await page.evaluate((l) => localStorage.setItem('heimdall-annotations.v1', JSON.stringify(l)), list)
+}
+
+/**
+ * Text and background colour of an element as sRGB 0–255 triples (computed `rgb()` or `color(srgb …)` — the
+ * latter is how Chromium serialises color-mix()), plus their WCAG contrast ratio.
+ */
+export async function textColours(page: Page, selector: string) {
+  const [color, background] = await page.locator(selector).evaluate((e) => {
+    const s = getComputedStyle(e)
+    return [s.color, s.backgroundColor]
+  })
+  const fg = parseCssColour(color)
+  const bg = parseCssColour(background)
+  return { fg, bg, contrast: contrastRatio(fg, bg) }
+}
+
+function parseCssColour(value: string): [number, number, number] {
+  const srgb = /^color\(srgb ([\d.e-]+) ([\d.e-]+) ([\d.e-]+)/.exec(value)
+  if (srgb) return [1, 2, 3].map((i) => Number(srgb[i]) * 255) as [number, number, number]
+  const rgb = /^rgba?\((\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)/.exec(value)
+  if (rgb) return [1, 2, 3].map((i) => Number(rgb[i])) as [number, number, number]
+  throw new Error(`unparsed colour ${value}`)
+}
+
+function contrastRatio(a: number[], b: number[]): number {
+  const lum = (c: number[]) =>
+    c
+      .map((v) => v / 255)
+      .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+      .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0)
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x)
+  return (hi + 0.05) / (lo + 0.05)
 }

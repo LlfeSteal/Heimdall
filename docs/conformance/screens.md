@@ -51,11 +51,11 @@ src/components/GroupCard.tsx      card + tiles
 src/components/IterationRail.tsx  back control, heading, placeholders/error/none/rows
 src/components/ChartCard.tsx      iteration header, score panel, centre states, strips, chart, dialogue
 src/components/BurndownChart.tsx  <Line> + annotation-plugin config + gutter overlay
-src/components/BurnupChart.tsx    <Line> + amber point markers
+src/components/BurnupChart.tsx    <Line> + point markers in the annotation type colour
 src/components/ScorePanel.tsx     compact (used) + expanded (implemented, unreachable — ledger #19)
 src/components/DeliverySummary.tsx, MetricsStrip.tsx
 src/components/AnnotationDialog.tsx, AnnotationsRail.tsx
-src/components/chartColors.ts     BLUE, ACCENT (warm), GREY, GREEN, NEUTRAL, RED, AMBER
+src/components/chartSetup.ts      useChartTheme(): token values read at runtime (STYLEGUIDE.md; no colour in code)
 ```
 
 Layout is free; the **observable contracts below are not**.
@@ -202,9 +202,9 @@ Burnup: `b = buildBurnupModel(iteration, today)`. Exact props the tests read:
 
 | `label` | `data` | required props |
 |---|---|---|
-| `S.legendRemaining` | `m.remaining` | `spanGaps: false`, `fill` truthy, `pointRadius` ≠ 0, no `borderDash`, `borderColor` BLUE, `pointBackgroundColor`: array of `m.axis.length`, `ACCENT` at `m.todayIndex`, BLUE (= `borderColor`, same value) elsewhere |
-| `S.legendIdeal` | `m.ideal` | `borderDash` non-empty, `pointRadius: 0`, GREY |
-| `S.legendForecast` | `m.forecast` | `borderDash` non-empty, `pointRadius: 0`, `spanGaps: true`, `borderColor` ACCENT (the same value used for today's dot) |
+| `S.legendRemaining` | `m.remaining` | `spanGaps: false`, `fill` truthy, `pointRadius` ≠ 0, no `borderDash`, `borderColor` `--remaining` (blue), `pointBackgroundColor`: array of `m.axis.length`, `--today` (red) at `m.todayIndex`, `--remaining` (= `borderColor`, same value) elsewhere |
+| `S.legendIdeal` | `m.ideal` | `borderDash` non-empty, `pointRadius: 0`, `--ideal` (gray) |
+| `S.legendForecast` | `m.forecast` | `borderDash` non-empty, `pointRadius: 0`, `spanGaps: true`, `borderColor` `--forecast` (orange; distinct from today's red dot — STYLEGUIDE.md wins over §13, see SPEC Implementation notes) |
 
 `options.plugins.title = { display: true, text: S.burndownTitle }`.
 `options.plugins.annotation.annotations` (object map or array):
@@ -229,9 +229,9 @@ outer edge of the gutter. Labels must render (unpositioned) when there is no cha
 
 **Burnup** (`data.labels = b.axis`; datasets in order): `S.legendCompleted` (`b.completed`, GREEN, `fill`
 truthy, `tension > 0`, `pointRadius` ≠ 0), `S.legendTotalScope` (`b.totalScope`, NEUTRAL, dashed,
-`pointRadius: 0`), `S.legendIdeal` (`b.ideal`, dashed), `S.legendForecast` (`b.forecast`, ACCENT, dashed).
+`pointRadius: 0`), `S.legendIdeal` (`b.ideal`, dashed), `S.legendForecast` (`b.forecast`, `--forecast`, dashed).
 Title `S.burnupTitle`. Annotations: one `{ type: 'point', xValue: date, yValue: completedAt(date) ?? 0,
-backgroundColor: AMBER, radius: 5 }` per distinct annotated date on the axis — **no** `label` entries, no
+backgroundColor: <type colour: --risk if any annotation of that date is a Risk, else --info>, radius: 5 }` per distinct annotated date on the axis — **no** `label` entries, no
 text anywhere in the config, no tolerance line, no gutter (SC10–SC12). Same `onClick`.
 
 ### 7. Annotations wiring
@@ -241,7 +241,7 @@ In `ReviewScreen`: `const ann = useAnnotations({ groupPath: group.fullPath, iter
 rely on these defaults). Changing the selected iteration resets the dialogue without a prompt (SA15).
 
 **Rail** `data-testid="annotations-rail"`: heading `S.annotationsHeading(ann.annotations.length)`; when
-empty `S.noAnnotations`; else one `data-testid="annotation-item"` per annotation in list order (amber card):
+empty `S.noAnnotations`; else one `data-testid="annotation-item"` per annotation in list order (neutral card, 3 px left edge in the type colour):
 date, `S.byAuthor(a.author)`, `<button>` `S.edit` → `ann.editFromList(a.id)`, `<button>` `S.delete` →
 `ann.remove(a.id)`, text (`white-space: pre-wrap`). Help box: `S.helpHeading`, `S.helpClick`, `S.helpLocal`
 as three text elements. The rail renders regardless of the chart's state (SR10).
@@ -372,14 +372,14 @@ unfiltered):
 |---|---|---|---|---|
 | CH-1 | Axis / Remaining / Ideal / Forecast data = domain model | §7.3–§7.4, §8 | [M] | SC01 |
 | CH-2 | Remaining solid, filled, dots, gaps break (`spanGaps:false`); Ideal dashed no dots; Forecast dashed no dots, bridges gaps (`spanGaps:true`) | §7.4 | [M] | SC02 |
-| CH-3 | Live: today's dot in the warm accent (= forecast colour); closed: none | §7.4, §13 | [M] | SC03, SC04 |
+| CH-3 | Live: today's dot in `--today` (red, distinct from Remaining and Forecast); closed: none | §7.4, §13 + STYLEGUIDE.md | [M] | SC03, SC04 |
 | CH-4 | Tolerance line dashed at 10 % of committed; none when committed 0 | §7.5 | [M] | SC05, SC08, SC09 |
 | CH-5 | Green `Deviation +10 %` / orange `Deviation +{n} %` visibility per §15.6 | §9, §15.6 | [M] | SC05, SC07, SC08, SC09 |
 | CH-6 | Labels in a gutter outside the plot, never in-plot | §9 | [M] | SC06 |
 | CH-7 | Gutter reserved only when ≥ 1 label | §9 | [M] | SC09 (absence), SC05 (presence) |
 | CH-8 | Label placement via `placeDeviationLabels`, anchored to the gutter's outer edge | §9 | [M] | code review (needs a real canvas) |
 | CH-9 | Burnup datasets = burnup model; Completed filled, gentle curve, dots; Total scope dashed | §7.6, ledger #8 | [M]/[KB] | SC10 |
-| CH-10 | Burnup: annotations = amber dots only (no text, no callout, no stacking) | §7.6 | [M] | SC12 |
+| CH-10 | Burnup: annotations = dots only, in the type colour (no text, no callout, no stacking) | §7.6 + STYLEGUIDE.md | [M] | SC12, SC16 |
 | CH-11 | Burnup: no tolerance line, no deviation gutter | §7.6, §9 | [A] | SC11 |
 | CH-12 | Callout per annotation anchored to its point, behind the data lines; blue info / red risk | §3.6, §10.5, §13 | [M] | SC13 |
 | CH-13 | Stacking / size / push directions from `annotationGeometry` (workload units, unclamped) | §10.5, ledger #11–#12 | [M]/[KB] | domain tests + code review |
@@ -398,7 +398,7 @@ unfiltered):
 | A-6 | Newlines allowed | §3.3 | [M] | SA05 |
 | A-7 | Actions `Cancel`, `Add` / `Edit`; closes on save or cancel | §3.3 | [M] | SA03, SA06, SA07 |
 | A-8 | Save writes through to storage scoped (group path, iid), re-read | §10.2, §10.3 | [M] | SA03, SA17 |
-| A-9 | List item: date, `by Current User`, `Edit`, `Delete`, text; amber | §3.4 | [M] | SA03 |
+| A-9 | List item: date, `by Current User`, `Edit`, `Delete`, text; neutral card with a type-colour edge | §3.4 + STYLEGUIDE.md | [M] | SA03 |
 | A-10 | List keeps save order | §3.4 | [M] | SA10 |
 | A-11 | Point with annotations opens the first for editing | §10.3, ledger #13 | [M] | SA08 |
 | A-12 | Delete removes within the pair, no prompt | §10.3 | [M] | SA09, SA17 |

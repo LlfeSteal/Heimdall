@@ -21,12 +21,14 @@ export function AnnotationList({ annotations, onEdit, onDelete }: Props) {
               <div className="annotation-meta">
                 <span className="annotation-date">{a.date}</span>
                 <span className="muted">{S.byAuthor(a.author)}</span>
+                {/* The type is otherwise shown only by the edge colour (STYLEGUIDE.md §12: shape before colour). */}
+                <span className="visually-hidden">{effectiveType(a) === 'risk' ? S.typeRisk : S.typeInformation}</span>
               </div>
               <div className="annotation-actions">
-                <button type="button" className="small" onClick={() => onEdit(a.id)}>
+                <button type="button" className="plain" onClick={() => onEdit(a.id)}>
                   {S.edit}
                 </button>
-                <button type="button" className="small" onClick={() => onDelete(a.id)}>
+                <button type="button" className="plain" onClick={() => onDelete(a.id)}>
                   {S.delete}
                 </button>
               </div>

@@ -5,9 +5,9 @@ test.describe('E-G group list', () => {
   test('E-G1 heading, guidance, cards alpha/beta/delta with their tiles; gamma and team-2 absent', async ({ page }) => {
     await gotoGroupList(page)
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Heimdall')
-    await expect(page.getByRole('heading', { name: 'Available ARTs (3)' })).toBeVisible()
-    const guidance = page.getByText('Select a ART under')
-    await expect(guidance).toContainText('Select a ART under org/delivery to view its iterations.')
+    await expect(page.getByRole('heading', { name: 'Available Teams (3)' })).toBeVisible()
+    const guidance = page.getByText('Select a Team under')
+    await expect(guidance).toContainText('Select a Team under org/delivery to view its iterations.')
     await expect(guidance.locator('code')).toHaveText('org/delivery')
 
     const cards = page.getByTestId('group-card')
@@ -44,7 +44,7 @@ test.describe('E-G group list', () => {
     const res = page.waitForResponse((r) => r.url().includes('/api/groups?refresh=1'))
     await page.getByRole('button', { name: 'Refresh' }).click()
     await res
-    await expect(page.getByRole('heading', { name: 'Available ARTs (3)' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Available Teams (3)' })).toBeVisible()
     expect(seen).toEqual(['/api/groups?refresh=1'])
   })
 
@@ -57,7 +57,7 @@ test.describe('E-G group list', () => {
     const ph = page.getByTestId('group-placeholder')
     await expect(ph).toHaveCount(3)
     for (const t of await ph.allTextContents()) expect(t).toBe('')
-    await expect(page.getByRole('heading', { name: 'Available ARTs (3)' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Available Teams (3)' })).toBeVisible()
   })
 
   test('E-G4 no URL change / history entry when navigating', async ({ page }) => {
@@ -68,8 +68,8 @@ test.describe('E-G group list', () => {
     await expect(page.getByTestId('review-header')).toBeVisible()
     expect(page.url()).toBe(url)
     expect(await page.evaluate(() => history.length)).toBe(len)
-    await page.getByRole('button', { name: '← Back to ARTs' }).click()
-    await expect(page.getByRole('heading', { name: 'Available ARTs (3)' })).toBeVisible()
+    await page.getByRole('button', { name: '← Back to Teams' }).click()
+    await expect(page.getByRole('heading', { name: 'Available Teams (3)' })).toBeVisible()
     expect(page.url()).toBe(url)
   })
 })

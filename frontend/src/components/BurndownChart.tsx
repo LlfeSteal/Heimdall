@@ -17,7 +17,17 @@ import { placeDeviationLabels } from '../domain/deviationLabels'
 import { type BurndownModel, buildBurndownModel } from '../domain/model'
 import { S } from '../strings'
 import { CALLOUT_GAP_PX, type CalloutBand, calloutLeft, calloutLines, widenRangeForCallouts } from './calloutLayout'
-import { ACCENT, BLUE, DASH, GREEN, GREY, LEGEND, RED, pointClickHandler, tint } from './chartSetup'
+import {
+  type ChartTheme,
+  DASH,
+  axisStyle,
+  legendStyle,
+  pointClickHandler,
+  tint,
+  titleStyle,
+  tooltipStyle,
+  useChartTheme,
+} from './chartSetup'
 import { DeviationGutter } from './DeviationGutter'
 
 const GUTTER_WIDTH = 112
@@ -35,6 +45,7 @@ interface Props {
 
 export function BurndownChart({ iteration, reports, annotations, onPointClick }: Props) {
   const today = todayUtc()
+  const theme = useChartTheme()
   const model = useMemo(
     () => buildBurndownModel({ iteration, iterations: reports, today }),
     [iteration, reports, today],
@@ -54,11 +65,11 @@ export function BurndownChart({ iteration, reports, annotations, onPointClick }:
   // oxlint-disable-next-line react/refs -- the ref is only read inside the plugin's afterLayout hook
   const [plugins] = useState<Plugin<'line'>[]>(() => [gutterPlugin(valuesRef, setPositions)])
 
-  const data = useMemo(() => burndownData(model), [model])
+  const data = useMemo(() => burndownData(model, theme), [model, theme])
   const options = useMemo(
     // oxlint-disable-next-line react/refs -- read only when Chart.js reports a click
-    () => burndownOptions(model, annotations, (date) => clickRef.current(date)),
-    [model, annotations],
+    () => burndownOptions(model, annotations, theme, (date) => clickRef.current(date)),
+    [model, annotations, theme],
   )
 
   return (
@@ -69,29 +80,29 @@ export function BurndownChart({ iteration, reports, annotations, onPointClick }:
   )
 }
 
-function burndownData(m: BurndownModel): ChartData<'line', (number | null)[], string> {
+function burndownData(m: BurndownModel, t: ChartTheme): ChartData<'line', (number | null)[], string> {
   return {
     labels: m.axis,
     datasets: [
       {
         label: S.legendRemaining,
         data: m.remaining,
-        borderColor: BLUE,
-        backgroundColor: tint(BLUE, 0.12),
+        borderColor: t.remaining,
+        backgroundColor: tint(t.remaining, 0.12),
         fill: 'origin',
         spanGaps: false,
         pointStyle: 'circle',
         pointRadius: 3,
         pointHoverRadius: 5,
-        // Today's dot on a live iteration takes the warm accent (§7.4, §13).
-        pointBackgroundColor: m.axis.map((_, i) => (i === m.todayIndex ? ACCENT : BLUE)),
-        pointBorderColor: m.axis.map((_, i) => (i === m.todayIndex ? ACCENT : BLUE)),
+        // Today's dot on a live iteration is red (§7.4; STYLEGUIDE.md §1: red means today).
+        pointBackgroundColor: m.axis.map((_, i) => (i === m.todayIndex ? t.today : t.remaining)),
+        pointBorderColor: m.axis.map((_, i) => (i === m.todayIndex ? t.today : t.remaining)),
       },
       {
         label: S.legendIdeal,
         data: m.ideal,
-        borderColor: GREY,
-        backgroundColor: GREY,
+        borderColor: t.ideal,
+        backgroundColor: t.ideal,
         borderDash: DASH,
         borderWidth: 1.5,
         pointStyle: 'line', // dashed swatch in the legend
@@ -102,8 +113,8 @@ function burndownData(m: BurndownModel): ChartData<'line', (number | null)[], st
       {
         label: S.legendForecast,
         data: m.forecast,
-        borderColor: ACCENT,
-        backgroundColor: ACCENT,
+        borderColor: t.forecast,
+        backgroundColor: t.forecast,
         borderDash: DASH,
         borderWidth: 2,
         pointStyle: 'line',
@@ -119,9 +130,11 @@ function burndownData(m: BurndownModel): ChartData<'line', (number | null)[], st
 function burndownOptions(
   m: BurndownModel,
   annotations: Annotation[],
+  t: ChartTheme,
   onPointClick: (date: string) => void,
 ): ChartOptions<'line'> {
-  const { entries, bands } = annotationEntries(m, annotations)
+  const { entries, bands } = annotationEntries(m, annotations, t)
+  const axis = axisStyle(t)
   return {
     responsive: true,
     maintainAspectRatio: false,
@@ -129,7 +142,9 @@ function burndownOptions(
     interaction: { mode: 'index', intersect: false },
     layout: { padding: { right: m.reserveGutter ? GUTTER_WIDTH : 0 } },
     scales: {
+      x: axis,
       y: {
+        ...axis,
         beginAtZero: true,
         // Ledger #11 as changed: widen the axis so every callout box stays inside the plot.
         afterDataLimits: (scale: Scale) => {
@@ -141,9 +156,10 @@ function burndownOptions(
     },
     onClick: pointClickHandler(m.axis, m.remaining, onPointClick),
     plugins: {
-      title: { display: true, text: S.burndownTitle },
-      legend: LEGEND,
+      title: titleStyle(t, S.burndownTitle),
+      legend: legendStyle(t),
       tooltip: {
+        ...tooltipStyle(t),
         callbacks: {
           // Every annotation text of the hovered date, one per line (§3.6, ledger #13).
           footer: (items: TooltipItem<'line'>[]) =>
@@ -158,7 +174,7 @@ function burndownOptions(
 /** Box border (px) — part of the drawn height on top of the §10.5 estimate. */
 const CALLOUT_BORDER = 1
 
-function annotationEntries(m: BurndownModel, annotations: Annotation[]) {
+function annotationEntries(m: BurndownModel, annotations: Annotation[], t: ChartTheme) {
   const entries: Record<string, AnnotationOptions> = {}
   const bands: CalloutBand[] = []
   if (m.tolerance !== null) {
@@ -166,7 +182,7 @@ function annotationEntries(m: BurndownModel, annotations: Annotation[]) {
       type: 'line',
       yMin: m.tolerance,
       yMax: m.tolerance,
-      borderColor: GREEN,
+      borderColor: t.tolerance,
       borderWidth: 1.5,
       borderDash: DASH,
       drawTime: 'beforeDatasetsDraw',
@@ -188,7 +204,7 @@ function annotationEntries(m: BurndownModel, annotations: Annotation[]) {
     const annotation = annotations[index]
     const { value } = items[index]
     const size = annotationLabelSize(annotation.text)
-    const colour = effectiveType(annotation) === 'risk' ? RED : BLUE
+    const colour = effectiveType(annotation) === 'risk' ? t.risk : t.info
     const axisIndex = m.axis.indexOf(date)
     const hSign = horizontalPushSign(axisIndex, m.axis.length)
     const vSign = verticalPushSign(value, range.min, range.max)
@@ -199,15 +215,16 @@ function annotationEntries(m: BurndownModel, annotations: Annotation[]) {
       yValue: value, // the point: the dashed callout runs from the box back to it
       content: calloutLines(annotation.text),
       drawTime: 'beforeDatasetsDraw', // behind the data lines (§10.5)
-      font: { size: 10, lineHeight: 1.3 },
+      font: { family: t.font, size: 10, lineHeight: 1.3 },
       textAlign: 'start',
       // Mirrors the §10.5 estimate: 14 px horizontal and 10 px vertical padding, 13 px lines.
       padding: { top: 5, bottom: 5, left: 7, right: 7 },
-      color: '#1f2937',
-      backgroundColor: tint(colour, 0.12),
+      // Neutral card box; the type colour carries the meaning (border, text, callout line).
+      color: colour,
+      backgroundColor: t.card,
       borderColor: colour,
       borderWidth: CALLOUT_BORDER,
-      borderRadius: 4,
+      borderRadius: 6,
       callout: { display: true, borderColor: colour, borderDash: [3, 3], borderWidth: 1 },
       // Box grows away from its point: upwards in the upper half of the range, downwards in the lower half.
       position: { x: 'start', y: vSign === 1 ? 'end' : 'start' },

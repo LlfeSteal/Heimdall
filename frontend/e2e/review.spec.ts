@@ -19,6 +19,7 @@ import {
   todayUtc,
   expect,
   test,
+  textColours,
 } from './helpers'
 
 test.describe('E-R iteration review', () => {
@@ -34,7 +35,7 @@ test.describe('E-R iteration review', () => {
     await expect(header.locator('h1')).toHaveText('Heimdall')
     await expect(header).toContainText('Alpha Release Train')
     await expect(header).toContainText(ALPHA)
-    await expect(page.getByRole('button', { name: '← Back to ARTs' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '← Back to Teams' })).toBeVisible()
     await expect(page.getByTestId('iteration-rail').getByRole('heading', { name: 'Iterations' })).toBeVisible()
 
     const rows = page.getByTestId('iteration-row')
@@ -54,7 +55,7 @@ test.describe('E-R iteration review', () => {
     await expect(card.getByTestId('state-badge')).toHaveText(expected.state)
   })
 
-  test('E-R2 burndown canvas renders non-blank with title, legend and today\'s accent point', async ({ page, request }) => {
+  test('E-R2 burndown canvas renders non-blank with title, legend and today\'s red point', async ({ page, request }) => {
     const reports = await apiReports(request, ALPHA)
     const live = reports.find((r) => r.state !== 'upcoming')!
     expect(live.state).toBe('current')
@@ -76,7 +77,7 @@ test.describe('E-R iteration review', () => {
     expect(stats.colours).toBeGreaterThan(20)
     expect(stats.variance).toBeGreaterThan(50)
 
-    // Axis runs to the due date; today's point exists (repair §7.2) and carries the accent (§7.4, §13).
+    // Axis runs to the due date; today's point exists (repair §7.2) and is red (§7.4; STYLEGUIDE.md: red = today).
     expect(snap.labels[0]).toBe(live.startDate)
     expect(snap.labels.at(-1)).toBe(live.dueDate)
     const ti = snap.labels.indexOf(today)
@@ -84,14 +85,14 @@ test.describe('E-R iteration review', () => {
     expect(live.report!.series.some((p) => p.date === today)).toBe(false) // the mock stops yesterday
     expect(snap.datasets[0].data[ti]).toBe(live.report!.totals.inProgress.weight)
     const pbc = snap.datasets[0].pointBackgroundColor as string[]
-    expect(pbc[ti]).toBe(COLOURS.ACCENT)
-    expect(pbc.filter((c) => c === COLOURS.ACCENT)).toHaveLength(1)
+    expect(pbc[ti]).toBe(COLOURS.TODAY)
+    expect(pbc.filter((c) => c === COLOURS.TODAY)).toHaveLength(1)
     expect(snap.datasets[0].borderColor).toBe(COLOURS.BLUE)
     expect(snap.datasets[1].borderColor).toBe(COLOURS.GREY)
-    expect(snap.datasets[2].borderColor).toBe(COLOURS.ACCENT)
-    // ...and is actually painted on the canvas in the accent colour.
+    expect(snap.datasets[2].borderColor).toBe(COLOURS.FORECAST)
+    // ...and is actually painted on the canvas in red.
     expect(snap.points[ti].skip).toBe(false)
-    expect(await canvasHasColourNear(page, snap.points[ti].x, snap.points[ti].y, COLOURS.ACCENT, 3)).toBe(true)
+    expect(await canvasHasColourNear(page, snap.points[ti].x, snap.points[ti].y, COLOURS.TODAY, 3)).toBe(true)
     // Remaining is blank after today (gap breaks the line), forecast starts at today.
     expect(snap.datasets[0].data.slice(ti + 1).every((v) => v === null)).toBe(true)
     // Tolerance line at 10 % of committed.
@@ -155,13 +156,20 @@ test.describe('E-R iteration review', () => {
     }
     // Ordered top-to-bottom by value.
     expect(forecastEnd > committed * 0.1 ? fcBox.y < tolBox.y : fcBox.y > tolBox.y).toBe(true)
-    // Colours per §13: green tolerance, warm forecast.
-    expect(await page.locator('[data-kind=tolerance]').evaluate((e) => getComputedStyle(e).color)).toBe('rgb(22, 163, 74)')
-    const fcColour = await page.locator('[data-kind=forecast]').evaluate((e) => getComputedStyle(e).color)
-    expect(fcColour).toMatch(/^rgb\((2[0-5]\d|19\d), \d+, \d+\)$/) // warm (red-dominant)
+    // Colours: green tolerance, orange forecast — text variants of the hues (--tolerance-text / --forecast-text,
+    // mixed toward --text) on a tint of the hue, legible at ≥ 4.5:1.
+    const tolC = await textColours(page, '[data-kind=tolerance]')
+    expect(tolC.fg[1]).toBeGreaterThan(tolC.fg[0]) // green-dominant
+    expect(tolC.fg[1]).toBeGreaterThan(tolC.fg[2])
+    expect(tolC.bg[1]).toBeGreaterThan(tolC.bg[0]) // green tint
+    expect(tolC.contrast).toBeGreaterThanOrEqual(4.5)
+    const fcC = await textColours(page, '[data-kind=forecast]')
+    expect(fcC.fg[0]).toBeGreaterThan(fcC.fg[1]) // warm: red > green > blue
+    expect(fcC.fg[1]).toBeGreaterThan(fcC.fg[2])
+    expect(fcC.contrast).toBeGreaterThanOrEqual(4.5)
   })
 
-  test('E-R4 closed iteration: green label only, no accent point', async ({ page }) => {
+  test('E-R4 closed iteration: green label only, no today point', async ({ page }) => {
     await gotoGroupList(page)
     await openCard(page, 'alpha')
     await selectIteration(page, 'Sprint 6')
@@ -192,7 +200,7 @@ test.describe('E-R iteration review', () => {
     expect(snap.legend).toEqual(['Completed', 'Total scope', 'Ideal', 'Forecast'])
     expect(snap.datasets[0].borderColor).toBe(COLOURS.GREEN)
     expect(snap.datasets[1].borderColor).toBe(COLOURS.NEUTRAL)
-    expect(snap.datasets[3].borderColor).toBe(COLOURS.ACCENT)
+    expect(snap.datasets[3].borderColor).toBe(COLOURS.FORECAST)
     expect(snap.annotations.filter((a) => a.type === 'line')).toHaveLength(0)
     const stats = await canvasPixelStats(page)
     expect(stats.colours).toBeGreaterThan(20)
@@ -246,7 +254,7 @@ test.describe('E-R iteration review', () => {
     await expect(page.locator('canvas')).toBeVisible()
     expect(seen.filter((u) => u.startsWith('/api/reports'))).toHaveLength(1)
     expect(seen.filter((u) => u.startsWith('/api/iterations'))).toHaveLength(1)
-    await page.getByRole('button', { name: '← Back to ARTs' }).click()
+    await page.getByRole('button', { name: '← Back to Teams' }).click()
     await openCard(page, 'alpha')
     await expect(page.locator('canvas')).toBeVisible()
     expect(seen.filter((u) => u.startsWith('/api/iterations'))).toHaveLength(2)
@@ -271,7 +279,7 @@ test.describe('E-R iteration review', () => {
     await expect(page.getByTestId('review-header').getByTestId('score-panel')).toHaveCount(1)
     await expect(page.getByTestId('review-header').getByTestId('score-panel')).toContainText(`Error: ${DELTA_ERROR}`)
     await expect(page.getByTestId('review-header').getByRole('button', { name: 'Refresh' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '← Back to ARTs' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '← Back to Teams' })).toBeVisible()
     await shot(page, '05-delta-error')
   })
 

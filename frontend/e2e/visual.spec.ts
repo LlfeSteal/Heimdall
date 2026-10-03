@@ -69,7 +69,7 @@ test.describe('E-V real-canvas checks', () => {
         expect(b.x + b.width).toBeLessThanOrEqual(centre.x + centre.width)
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-      await page.getByRole('button', { name: '← Back to ARTs' }).click()
+      await page.getByRole('button', { name: '← Back to Teams' }).click()
     }
   })
 

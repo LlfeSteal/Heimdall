@@ -62,15 +62,13 @@ test.describe('E-A annotations', () => {
     const label = after.annotations.find((a) => a.type === 'label')
     expect(label?.content).toEqual(['Scope added mid-sprint', 'waiting on API team'])
     expect(label?.drawTime).toBe('beforeDatasetsDraw')
-    expect(String(label?.backgroundColor)).toContain('220, 38, 38') // RED tint
+    expect(label?.borderColor).toBe(COLOURS.RED) // Risk: red edge on a neutral card box
+    expect(label?.backgroundColor).toBe(COLOURS.CARD)
     await addAnnotation(page, d2, 'Team member sick', 'Information')
     await expect(items).toHaveCount(2)
     await expect(items.nth(1)).toHaveAttribute('data-type', 'information')
     const after2 = await chartSnapshot(page)
-    expect(after2.annotations.filter((a) => a.type === 'label').map((a) => String(a.backgroundColor))).toEqual([
-      expect.stringContaining('220, 38, 38'),
-      expect.stringContaining('37, 99, 235'),
-    ])
+    expect(after2.annotations.filter((a) => a.type === 'label').map((a) => a.borderColor)).toEqual([COLOURS.RED, COLOURS.BLUE])
     await shot(page, '02-review-burndown-annotations')
 
     // Storage carries the (group, iid) scope.
@@ -80,7 +78,7 @@ test.describe('E-A annotations', () => {
 
     // Reload: back on the group list (no deep links), annotation still there (localStorage).
     await page.reload()
-    await expect(page.getByRole('heading', { name: 'Available ARTs (3)' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Available Teams (3)' })).toBeVisible()
     await expect(page.getByTestId('review-header')).toHaveCount(0)
     await openCard(page, 'alpha')
     await expect(rail.getByRole('heading', { name: 'Annotations (2)' })).toBeVisible()
@@ -155,7 +153,7 @@ test.describe('E-A annotations', () => {
     expect(await storedAnnotations(page)).toHaveLength(0)
   })
 
-  test('E-A2 burnup shows annotations as amber point markers only', async ({ page }) => {
+  test('E-A2 burnup shows annotations as point markers in the type colour only', async ({ page }) => {
     await gotoGroupList(page)
     await openCard(page, 'alpha')
     const snap = await chartSnapshot(page)
@@ -166,7 +164,7 @@ test.describe('E-A annotations', () => {
     const up = await chartSnapshot(page)
     expect(up.annotations).toHaveLength(1)
     expect(up.annotations[0].type).toBe('point')
-    expect(up.annotations[0].backgroundColor).toBe(COLOURS.AMBER)
+    expect(up.annotations[0].backgroundColor).toBe(COLOURS.BLUE) // Information
     expect(up.annotations[0].content).toBeUndefined()
   })
 
@@ -183,7 +181,7 @@ test.describe('E-A annotations', () => {
     await addAnnotation(page, snapA.labels[1], 'Alpha only note', 'Information')
     await expect(page.getByTestId('annotation-item')).toHaveCount(1)
 
-    await page.getByRole('button', { name: '← Back to ARTs' }).click()
+    await page.getByRole('button', { name: '← Back to Teams' }).click()
     await openTile(page, 'team-1')
     await expect(page.locator('canvas')).toBeVisible()
     await expect(page.getByTestId('chart-card').locator('.iteration-header h2')).toHaveText(tSel.title)
@@ -198,7 +196,7 @@ test.describe('E-A annotations', () => {
     await page.getByTestId('annotation-item').getByRole('button', { name: 'Delete' }).click()
     await expect(page.getByTestId('annotation-item')).toHaveCount(0)
 
-    await page.getByRole('button', { name: '← Back to ARTs' }).click()
+    await page.getByRole('button', { name: '← Back to Teams' }).click()
     await openCard(page, 'alpha')
     await expect(rail.getByRole('heading', { name: 'Annotations (1)' })).toBeVisible()
     await expect(page.getByTestId('annotation-item')).toContainText('Alpha only note')

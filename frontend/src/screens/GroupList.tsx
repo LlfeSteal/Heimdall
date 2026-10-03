@@ -2,6 +2,8 @@
 import type { UseQueryResult } from '@tanstack/react-query'
 import type { AppConfig, GroupCard, GroupTile } from '../api/types'
 import { useGroups } from '../api/queries'
+import { AppearanceSwitch } from '../components/AppearanceSwitch'
+import { AppIcon, BurndownIcon, RefreshIcon, WarningIcon } from '../components/Icons'
 import { S } from '../strings'
 
 interface Props {
@@ -20,14 +22,23 @@ export function GroupList({ config, gen, onRefresh, onSelect }: Props) {
 
   return (
     <div className="page">
-      <header className="page-header">
-        <h1>{S.productTitle}</h1>
+      <header className="toolbar">
+        <div className="toolbar-title">
+          <AppIcon />
+          <h1>{S.productTitle}</h1>
+        </div>
+        <div className="toolbar-actions">
+          <AppearanceSwitch />
+        </div>
       </header>
-      <main className="group-list">
+      <main className="content group-list">
         {config.isError || groups.isError ? (
-          <section className="state-box" role="alert">
-            <h2>{S.groupLoadingError}</h2>
-            <p className="error-text">{(config.error ?? groups.error)?.message}</p>
+          <section className="banner" role="alert">
+            <WarningIcon size={20} className="banner-icon" />
+            <div className="banner-body">
+              <h2>{S.groupLoadingError}</h2>
+              <p className="error-text">{(config.error ?? groups.error)?.message}</p>
+            </div>
             <button type="button" onClick={retry}>
               {S.retry}
             </button>
@@ -57,6 +68,7 @@ function Populated({ config, cards, onRefresh, onSelect }: PopulatedProps) {
   const { groupTerm: term, rootGroup: root } = config
   const refresh = (
     <button type="button" onClick={onRefresh}>
+      <RefreshIcon size={15} />
       {S.refresh}
     </button>
   )
@@ -64,7 +76,8 @@ function Populated({ config, cards, onRefresh, onSelect }: PopulatedProps) {
   if (cards.length === 0) {
     const body = S.noGroupBody(term, root)
     return (
-      <section className="state-box">
+      <section className="empty-state">
+        <BurndownIcon size={40} strokeWidth={1.8} className="empty-icon" />
         <h2>{S.noGroupHeading(term)}</h2>
         <p>
           {body.before}

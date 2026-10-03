@@ -1251,6 +1251,18 @@ So for §15.3: `8.8 %` → **good**, `+2.5 pts` → **caution**, `50 %` → **ca
     even on crowded iterations. The "labels vanish off the top" behaviour no longer exists.
   - Ledger #18 (≤ 5 minutes stale) is guaranteed end-to-end: the browser does not add its own freshness window
     on top of the backend's.
+- Visual design follows `STYLEGUIDE.md` (Apple-HIG-style tokens, system font, hairlines, translucent toolbar).
+  Where it conflicts with the §13 colour words, the guide wins (user decision, 2026-10-03): today's dot is
+  **red** (the guide's "red = today"), distinct from the **orange** forecast and forecast label; annotation list
+  cards are neutral cards with a 3 px left edge in the type colour (blue *Information*, red *Risk*) — no amber
+  anywhere; burnup annotation markers take the type colour (red when any annotation of that date is a Risk);
+  figure tones good / caution / poor map to the guide's on-track green / at-risk orange / late red; the ideal
+  reference is the guide's gray, tolerance and burnup delivered are green, the committed-workload reference is
+  the secondary neutral. Components expose states (`data-*`) and the stylesheet maps them to tokens; the
+  canvas reads the same tokens at runtime.
+- Dark mode added: an **Automatic / Light / Dark** switch in the toolbar of both screens (preference in
+  `localStorage['heimdall-appearance']`, default Automatic, which follows the system live). The choice sets
+  `data-theme="light|dark"` on `<html>`, applied by an inline script before first paint.
 - GitLab GraphQL mapping: `burnupTimeSeries { date scopeWeight completedWeight }` → committed = scopeWeight,
   delivered = completedWeight, remaining = committed − delivered (not clamped).
   `stats { total complete incomplete { count weight } }` → committed / delivered / inProgress.

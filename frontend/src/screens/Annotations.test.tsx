@@ -115,6 +115,23 @@ describe('§3.3 annotation dialogue', () => {
     await waitFor(() => expect(stored()).toEqual([expect.objectContaining({ type: 'risk', text: 'Key dev sick' })]))
   })
 
+  it('SA04b each list item names its type in text, not only by its edge colour (STYLEGUIDE.md §12)', async () => {
+    const { user } = renderApp()
+    await openAlpha(user)
+    await addAnnotation(user, '2026-03-05', 'Scope added by PO')
+    clickPoint('2026-03-06')
+    await screen.findByTestId('annotation-dialog')
+    await user.click(within(dialog()).getByRole('button', { name: S.typeRisk }))
+    await user.type(textarea(), 'Key dev sick')
+    await user.click(within(dialog()).getByRole('button', { name: S.add }))
+    await waitFor(() => expect(items()).toHaveLength(2))
+    const [info, risk] = items()
+    expect(within(info).getByText(S.typeInformation)).toHaveClass('visually-hidden')
+    expect(within(info).queryByText(S.typeRisk)).toBeNull()
+    expect(within(risk).getByText(S.typeRisk)).toHaveClass('visually-hidden')
+    expect(within(risk).queryByText(S.typeInformation)).toBeNull()
+  })
+
   it('SA05 free text with newlines: Enter inserts a newline, it does not submit', async () => {
     const { user } = renderApp()
     await openAlpha(user)

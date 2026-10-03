@@ -4,7 +4,24 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
     <title>Heimdall</title>
+    <!-- Appearance before first paint (STYLEGUIDE.md §10); mirrors src/theme/appearance.ts. -->
+    <script id="appearance-script">
+      (function () {
+        var appearance = 'auto'
+        try {
+          var stored = localStorage.getItem('heimdall-appearance')
+          if (stored === 'light' || stored === 'dark' || stored === 'auto') appearance = stored
+        } catch (e) {}
+        var dark =
+          appearance === 'dark' ||
+          (appearance === 'auto' && !!window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

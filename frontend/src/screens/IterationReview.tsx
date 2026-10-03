@@ -8,9 +8,11 @@ import { useIterations, useReports } from '../api/queries'
 import { type UseAnnotationsResult, useAnnotations } from '../annotations/useAnnotations'
 import { AnnotationDialog } from '../components/AnnotationDialog'
 import { AnnotationList } from '../components/AnnotationList'
+import { AppearanceSwitch } from '../components/AppearanceSwitch'
 import { BurndownChart } from '../components/BurndownChart'
 import { BurnupChart } from '../components/BurnupChart'
 import { DeliverySummary } from '../components/DeliverySummary'
+import { AppIcon, CalendarIcon, RefreshIcon, WarningIcon } from '../components/Icons'
 import { IterationChooser, StateBadge } from '../components/IterationChooser'
 import { MetricsStrip } from '../components/MetricsStrip'
 import { ScorePanel, type ScoreState } from '../components/ScorePanel'
@@ -51,19 +53,31 @@ export function IterationReview({ entry, group, term, onBack }: Props) {
   const scorePanel = <ScorePanel state={score} />
   return (
     <div className="page review">
-      <header className="review-header" data-testid="review-header">
-        <h1>{S.productTitle}</h1>
-        <div className="group-id">
-          <h2 className="group-name">{group.name}</h2>
-          <span className="group-path">{group.fullPath}</span>
+      <header className="toolbar review-header" data-testid="review-header">
+        <div className="toolbar-title">
+          <AppIcon />
+          <div className="group-id">
+            <div className="title-line">
+              <h1>{S.productTitle}</h1>
+              <span className="title-separator" aria-hidden="true">
+                ·
+              </span>
+              <h2 className="group-name">{group.name}</h2>
+            </div>
+            <span className="group-path">{group.fullPath}</span>
+          </div>
         </div>
         {/* The score sits here only while no iteration is chosen (§3.2). */}
         {!selected && scorePanel}
-        <button type="button" className="refresh" onClick={() => setGen((g) => g + 1)}>
-          {S.refresh}
-        </button>
+        <div className="toolbar-actions">
+          <button type="button" className="refresh" onClick={() => setGen((g) => g + 1)}>
+            <RefreshIcon size={15} />
+            {S.refresh}
+          </button>
+          <AppearanceSwitch />
+        </div>
       </header>
-      <div className="review-grid">
+      <div className="content review-grid">
         <IterationChooser
           term={term}
           iterations={iterations}
@@ -82,7 +96,10 @@ export function IterationReview({ entry, group, term, onBack }: Props) {
               ann={ann}
             />
           ) : (
-            <p className="centre-placeholder">{S.selectIteration}</p>
+            <div className="empty-state centre-placeholder">
+              <CalendarIcon size={40} className="empty-icon" />
+              <p>{S.selectIteration}</p>
+            </div>
           )}
         </main>
         <AnnotationList annotations={ann.annotations} onEdit={ann.editFromList} onDelete={ann.remove} />
@@ -165,7 +182,7 @@ function ChartBody({ selected, reports, view, onView, ann }: Omit<ChartCardProps
   return (
     <>
       <div className="chart-toolbar">
-        <div className="view-switch" role="group" aria-label={`${S.viewBurndown} / ${S.viewBurnup}`}>
+        <div className="toggle-group view-switch" role="group" aria-label={`${S.viewBurndown} / ${S.viewBurnup}`}>
           <button type="button" aria-pressed={view === 'burndown'} onClick={() => onView('burndown')}>
             {S.viewBurndown}
           </button>
@@ -191,11 +208,17 @@ function ChartBody({ selected, reports, view, onView, ann }: Omit<ChartCardProps
 }
 
 function ChartMessage({ text, error = false }: { text: string; error?: boolean }) {
+  if (error) {
+    return (
+      <div className="banner banner-compact" role="alert">
+        <WarningIcon size={16} className="banner-icon" />
+        <p className="error-text">{text}</p>
+      </div>
+    )
+  }
   return (
     <div className="chart-state">
-      <p className={error ? 'error-text' : 'muted'} role={error ? 'alert' : undefined}>
-        {text}
-      </p>
+      <p className="muted">{text}</p>
     </div>
   )
 }

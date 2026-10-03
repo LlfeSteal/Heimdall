@@ -3,6 +3,12 @@
 export const S = {
   productTitle: 'Heimdall',
 
+  // Appearance switch (STYLEGUIDE.md §10)
+  appearance: 'Appearance',
+  appearanceAuto: 'Automatic',
+  appearanceLight: 'Light',
+  appearanceDark: 'Dark',
+
   // Screen 1 — group list (Amendment A.4 replaces guidance / nothing-eligible)
   groupGuidance: (term: string, root: string) => ({ before: `Select a ${term} under `, code: root, after: ' to view its iterations.' }),
   groupLoadingError: 'Loading error',

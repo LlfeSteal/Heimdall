@@ -33,7 +33,7 @@ export function AnnotationDialog({ dialogue, canSave, onText, onType, onCancel, 
       <p className="muted">{S.dialogDate(dialogue.date)}</p>
       <div className="type-row">
         <span id={typeId}>{S.typeLabel}</span>
-        <div className="segmented" role="group" aria-labelledby={typeId}>
+        <div className="toggle-group" role="group" aria-labelledby={typeId}>
           {TYPES.map(({ type, label }) => (
             <button
               key={type}
@@ -43,6 +43,7 @@ export function AnnotationDialog({ dialogue, canSave, onText, onType, onCancel, 
               aria-pressed={dialogue.type === type}
               onClick={() => onType(type)}
             >
+              <span className="type-dot" aria-hidden="true" />
               {label}
             </button>
           ))}

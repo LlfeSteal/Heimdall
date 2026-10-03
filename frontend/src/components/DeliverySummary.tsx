@@ -8,13 +8,13 @@ export function DeliverySummary({ report }: { report: Report }) {
   return (
     <div className="delivery-summary" data-testid="delivery-summary">
       <span className="summary-item">
-        <span className="dot" data-colour="green" aria-hidden="true" />
+        <span className="dot" data-series="delivered" aria-hidden="true" />
         <span>{S.summaryCompleted}</span>
         <strong>{s.completedShare}</strong>
         <span className="muted">{s.completedOf}</span>
       </span>
       <span className="summary-item">
-        <span className="dot" data-colour="blue" aria-hidden="true" />
+        <span className="dot" data-series="in-progress" aria-hidden="true" />
         <span>{S.summaryInProgress}</span>
         <strong>{s.inProgressShare}</strong>
         <span className="muted">{s.inProgressOf}</span>

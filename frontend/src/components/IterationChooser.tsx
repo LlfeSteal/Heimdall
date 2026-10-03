@@ -2,6 +2,7 @@
 import type { UseQueryResult } from '@tanstack/react-query'
 import type { Iteration } from '../api/types'
 import { S } from '../strings'
+import { WarningIcon } from './Icons'
 
 interface Props {
   term: string
@@ -26,9 +27,10 @@ export function IterationChooser({ term, iterations, selectedId, onSelect, onBac
           ))}
         </div>
       ) : iterations.isError ? (
-        <p className="error-text" role="alert">
-          {iterations.error.message}
-        </p>
+        <div className="banner banner-compact" role="alert">
+          <WarningIcon size={16} className="banner-icon" />
+          <p className="error-text">{iterations.error.message}</p>
+        </div>
       ) : rows.length === 0 ? (
         <p className="muted">{S.noIterations(term)}</p>
       ) : (
