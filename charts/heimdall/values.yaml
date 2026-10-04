@@ -1,0 +1,264 @@
+# Default values for the Heimdall chart.
+# Topology mirrors docker-compose.yml: a Go API ("backend") behind an nginx-served SPA ("frontend")
+# that proxies /api/ to it. Only the frontend is meant to be exposed (Service / Ingress).
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Pull secrets for both images (list of {name: <secret>}).
+imagePullSecrets: []
+
+# ---------------------------------------------------------------------------------------------------
+# Application configuration (backend environment, see backend/internal/config/config.go)
+# ---------------------------------------------------------------------------------------------------
+config:
+  # ROOT_GROUP (required): full path of the parent GitLab group whose depth-1/2 sub-groups are offered.
+  rootGroup: ""
+  # GROUP_TERM: noun used for groups in the UI (singular; the UI appends "s").
+  groupTerm: Team
+  # GITLAB_MOCK=1: serve built-in fixture data instead of calling GitLab (no url/token needed).
+  mock: false
+  # GITLAB_MAX_CONCURRENCY: GitLab requests in flight. Empty → backend default (12).
+  maxConcurrency: ""
+  # GITLAB_READ_TIMEOUT: deadline of one GitLab read, e.g. "90s" or "2m". Empty → backend default (90s).
+  readTimeout: ""
+  # GIN_MODE.
+  ginMode: release
+
+gitlab:
+  # GITLAB_URL: base URL of the GitLab instance (required unless config.mock=true).
+  url: ""
+  # GITLAB_TOKEN (read_api scope is enough). Stored in a Secret created by the chart.
+  # Prefer existingSecret in production so the token never lands in values files.
+  token: ""
+  # Name of an existing Secret holding the token; when set, `token` is ignored and no Secret is created.
+  existingSecret: ""
+  # Key of the token inside existingSecret.
+  existingSecretKey: GITLAB_TOKEN
+  # Extra CA certificate(s) for a self-hosted GitLab with an internal TLS certificate.
+  # The PEM file is mounted in /etc/heimdall/ca and added to the system trust store
+  # (SSL_CERT_DIR; public CAs keep working). Set exactly one of existingConfigMap / existingSecret.
+  caBundle:
+    existingConfigMap: ""
+    existingSecret: ""
+    # Key holding the PEM bundle.
+    key: ca.crt
+
+# ---------------------------------------------------------------------------------------------------
+# Backend (Go API)
+# ---------------------------------------------------------------------------------------------------
+backend:
+  replicaCount: 1  # each pod keeps its own in-memory GitLab cache; >1 works, caches are just colder
+
+  image:
+    registry: ""                     # e.g. registry.example.com
+    repository: heimdall-backend     # e.g. my-group/heimdall-backend
+    tag: ""                          # defaults to the chart appVersion
+    digest: ""                       # sha256:...; takes precedence over tag
+    pullPolicy: IfNotPresent
+
+  containerPort: 8080
+
+  service:
+    type: ClusterIP
+    port: 8080
+    annotations: {}
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    fsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+  livenessProbe:
+    httpGet:
+      path: /api/health
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /api/health
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Additional environment (list of EnvVar), e.g. HTTPS_PROXY / NO_PROXY.
+  extraEnv: []
+  # Additional envFrom sources (list of EnvFromSource).
+  extraEnvFrom: []
+  extraVolumes: []
+  extraVolumeMounts: []
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: ""
+
+  pdb:
+    enabled: false
+    minAvailable: ""
+    maxUnavailable: 1
+
+# ---------------------------------------------------------------------------------------------------
+# Frontend (nginx serving the SPA, proxying /api/ to the backend Service)
+# ---------------------------------------------------------------------------------------------------
+frontend:
+  replicaCount: 1
+
+  image:
+    registry: ""
+    repository: heimdall-frontend
+    tag: ""
+    digest: ""
+    pullPolicy: IfNotPresent
+
+  # nginx listens on an unprivileged port so the container can run as non-root.
+  containerPort: 8080
+
+  service:
+    type: ClusterIP
+    port: 80
+    nodePort: ""          # only used with type NodePort / LoadBalancer
+    annotations: {}
+
+  # nginx settings rendered into the chart's default.conf (copy of frontend/nginx.conf).
+  nginx:
+    # Also listen on [::] (dual-stack clusters). Off by default: nginx fails to start in pods without IPv6.
+    listenIPv6: false
+    # The predictability score can take up to 30 s on a cold cache; keep well above it.
+    proxyConnectTimeout: 5s
+    proxySendTimeout: 60s
+    proxyReadTimeout: 60s
+    # Extra directives appended inside the server block.
+    extraServerConfig: ""
+
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 128Mi   # nginx starts one worker per node CPU
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101       # "nginx" user of the nginx:alpine image
+    runAsGroup: 101
+    fsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
+
+  livenessProbe:
+    httpGet:
+      path: /index.html
+      port: http
+    initialDelaySeconds: 3
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /index.html
+      port: http
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  extraEnv: []
+  extraEnvFrom: []
+  extraVolumes: []
+  extraVolumeMounts: []
+
+  podAnnotations: {}
+  podLabels: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+
+  autoscaling:
+    enabled: false
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: ""
+
+  pdb:
+    enabled: false
+    minAvailable: ""
+    maxUnavailable: 1
+
+# ---------------------------------------------------------------------------------------------------
+# Exposure
+# ---------------------------------------------------------------------------------------------------
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # cert-manager.io/cluster-issuer: letsencrypt
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+  hosts:
+    - host: heimdall.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: heimdall-tls
+  #    hosts:
+  #      - heimdall.example.com
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # Heimdall never talks to the Kubernetes API.
+  automountServiceAccountToken: false
+
+# Restricts backend ingress to the frontend pods. The frontend stays reachable
+# from anywhere in the cluster unless frontendIngressFrom is set (list of NetworkPolicyPeer).
+networkPolicy:
+  enabled: false
+  frontendIngressFrom: []
+  #  - namespaceSelector:
+  #      matchLabels:
+  #        kubernetes.io/metadata.name: ingress-nginx
+
+# Common labels added to every resource.
+commonLabels: {}

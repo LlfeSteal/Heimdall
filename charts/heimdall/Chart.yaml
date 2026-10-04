@@ -1,0 +1,10 @@
+apiVersion: v2
+name: heimdall
+description: Heimdall — GitLab iteration deviation curves, forecast and predictability score (Go API + nginx-served SPA).
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - gitlab
+  - iterations
+  - agile

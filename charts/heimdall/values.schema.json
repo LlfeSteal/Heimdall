@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": ["config", "gitlab", "backend", "frontend"],
+  "properties": {
+    "config": {
+      "type": "object",
+      "required": ["rootGroup"],
+      "properties": {
+        "rootGroup": { "type": "string", "description": "ROOT_GROUP: full path of the parent GitLab group" },
+        "groupTerm": { "type": "string", "minLength": 1 },
+        "mock": { "type": "boolean" },
+        "maxConcurrency": { "type": ["integer", "string"], "pattern": "^([1-9][0-9]*)?$", "minimum": 1 },
+        "readTimeout": { "type": ["integer", "string"] },
+        "ginMode": { "type": "string", "enum": ["release", "debug", "test"] }
+      }
+    },
+    "gitlab": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string", "pattern": "^(https?://.+)?$" },
+        "token": { "type": "string" },
+        "existingSecret": { "type": "string" },
+        "existingSecretKey": { "type": "string", "minLength": 1 },
+        "caBundle": {
+          "type": "object",
+          "properties": {
+            "existingConfigMap": { "type": "string" },
+            "existingSecret": { "type": "string" },
+            "key": { "type": "string", "minLength": 1 }
+          }
+        }
+      }
+    },
+    "backend": { "$ref": "#/definitions/component" },
+    "frontend": { "$ref": "#/definitions/component" },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "className": { "type": "string" },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["paths"],
+            "properties": {
+              "host": { "type": "string" },
+              "paths": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "required": ["path"],
+                  "properties": {
+                    "path": { "type": "string" },
+                    "pathType": { "type": "string", "enum": ["Prefix", "Exact", "ImplementationSpecific"] }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tls": { "type": "array" }
+      }
+    }
+  },
+  "definitions": {
+    "component": {
+      "type": "object",
+      "properties": {
+        "replicaCount": { "type": "integer", "minimum": 0 },
+        "containerPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "image": {
+          "type": "object",
+          "required": ["repository"],
+          "properties": {
+            "registry": { "type": "string" },
+            "repository": { "type": "string", "minLength": 1 },
+            "tag": { "type": ["string", "number"] },
+            "digest": { "type": "string" },
+            "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+          }
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string", "enum": ["ClusterIP", "NodePort", "LoadBalancer"] },
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 }
+          }
+        },
+        "extraEnv": { "type": "array" },
+        "extraEnvFrom": { "type": "array" },
+        "extraVolumes": { "type": "array" },
+        "extraVolumeMounts": { "type": "array" }
+      }
+    }
+  }
+}

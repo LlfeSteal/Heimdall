@@ -1,0 +1,22 @@
+{{- include "heimdall.validate" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "heimdall.backend.fullname" . }}
+  labels:
+    {{- include "heimdall.componentLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+data:
+  ROOT_GROUP: {{ .Values.config.rootGroup | quote }}
+  GROUP_TERM: {{ .Values.config.groupTerm | quote }}
+  GITLAB_MOCK: {{ ternary "1" "0" (.Values.config.mock | default false) | quote }}
+  GIN_MODE: {{ .Values.config.ginMode | quote }}
+  PORT: {{ .Values.backend.containerPort | quote }}
+  {{- with .Values.gitlab.url }}
+  GITLAB_URL: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.config.maxConcurrency }}
+  GITLAB_MAX_CONCURRENCY: {{ . | toString | quote }}
+  {{- end }}
+  {{- with .Values.config.readTimeout }}
+  GITLAB_READ_TIMEOUT: {{ . | toString | quote }}
+  {{- end }}

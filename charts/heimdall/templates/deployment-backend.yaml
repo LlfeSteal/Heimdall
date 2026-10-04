@@ -1,0 +1,140 @@
+{{- $c := .Values.backend }}
+{{- $ca := .Values.gitlab.caBundle }}
+{{- $tokenSecret := include "heimdall.tokenSecretName" . }}
+{{- $hasCA := or $ca.existingConfigMap $ca.existingSecret }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "heimdall.backend.fullname" . }}
+  labels:
+    {{- include "heimdall.componentLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+spec:
+  {{- if not $c.autoscaling.enabled }}
+  replicas: {{ $c.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "heimdall.componentSelectorLabels" (dict "ctx" . "component" "backend") | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap-backend.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with $c.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "heimdall.componentLabels" (dict "ctx" . "component" "backend") | nindent 8 }}
+        {{- with $c.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "heimdall.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with $c.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with $c.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: backend
+          image: {{ include "heimdall.image" (dict "image" $c.image "ctx" .) | quote }}
+          imagePullPolicy: {{ $c.image.pullPolicy }}
+          {{- with $c.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ $c.containerPort }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "heimdall.backend.fullname" . }}
+            {{- with $c.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if or $tokenSecret $hasCA $c.extraEnv }}
+          env:
+            {{- if $tokenSecret }}
+            - name: GITLAB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $tokenSecret }}
+                  key: {{ include "heimdall.tokenSecretKey" . }}
+            {{- end }}
+            {{- if $hasCA }}
+            # Additive to the system bundle (SSL_CERT_FILE would replace it).
+            - name: SSL_CERT_DIR
+              value: /etc/heimdall/ca
+            {{- end }}
+            {{- with $c.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- with $c.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $c.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $c.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if $hasCA }}
+            - name: gitlab-ca
+              mountPath: /etc/heimdall/ca
+              readOnly: true
+            {{- end }}
+            {{- with $c.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if $ca.existingConfigMap }}
+        - name: gitlab-ca
+          configMap:
+            name: {{ $ca.existingConfigMap }}
+            items:
+              - key: {{ $ca.key }}
+                path: ca.crt
+        {{- else if $ca.existingSecret }}
+        - name: gitlab-ca
+          secret:
+            secretName: {{ $ca.existingSecret }}
+            items:
+              - key: {{ $ca.key }}
+                path: ca.crt
+        {{- end }}
+        {{- with $c.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $c.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $c.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $c.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $c.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
