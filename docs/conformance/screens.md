@@ -51,7 +51,7 @@ src/components/GroupCard.tsx      card + tiles
 src/components/IterationRail.tsx  back control, heading, placeholders/error/none/rows
 src/components/ChartCard.tsx      iteration header, score panel, centre states, strips, chart, dialogue
 src/components/BurndownChart.tsx  <Line> + annotation-plugin config + gutter overlay
-src/components/BurnupChart.tsx    <Line> + point markers in the annotation type colour
+src/components/BurnupChart.tsx    <Line> + forecast caption, completion / open-at-due markers, annotation dots (Amendment B)
 src/components/ScorePanel.tsx     compact (used) + expanded (implemented, unreachable — ledger #19)
 src/components/DeliverySummary.tsx, MetricsStrip.tsx
 src/components/AnnotationDialog.tsx, AnnotationsRail.tsx
@@ -136,7 +136,8 @@ selected: `data-testid="chart-card"` containing, in order:
    - `it.reportError` non-null → `it.reportError` verbatim;
    - `it.report === null` or `it.report.series.length === 0` → `S.noBurnupData`;
    - otherwise: view switch (`<button>` `S.viewBurndown`, `<button>` `S.viewBurnup`; default Burndown),
-     `data-testid="metrics-strip"`, `data-testid="delivery-summary"`, the chart, and the annotation dialogue
+     then the centred `data-testid="chart-head"`: `<h3>` chart title (the canvas title is configured but
+     `display: false`), `data-testid="delivery-summary"`, `data-testid="metrics-strip"` (SR14b); the chart, and the annotation dialogue
      (when open) directly **under** the chart.
 
    No `<Line>` is rendered in any other case (never an empty chart frame).
@@ -145,7 +146,7 @@ selected: `data-testid="chart-card"` containing, in order:
 `completedShare`, `completedOf`, blue dot, `S.summaryInProgress`, `inProgressShare`, `inProgressOf`
 (SR15 checks the order in `textContent`: `Completed … 90% … 45.0 of 50.0 … In Progress … 10% … 5.0 of 50.0`).
 
-**Metrics strip** (`presentMetrics(deliveryMetrics(report))`): two elements whose text is **exactly**
+**Metrics strip** (`presentMetrics(iterationMetrics(iteration, today))`; open iterations add a muted `S.metricsVsIdeal`): two elements whose text is **exactly**
 `deviationText` / `diffText` (e.g. `Deviation: 10.0%`, `Diff: +5.0 pts`), each with `data-tone="good|caution|poor"` (SR16).
 
 **Colour convention for tests:** every colour-coded figure is the element whose text is the figure and carries
@@ -196,7 +197,7 @@ SR17 asserts its literals are absent).
 ### 6. Charts (react-chartjs-2 `<Line>`; chart.js + chartjs-plugin-annotation registered at module load)
 
 `today = todayUtc()` per render. Burndown: `m = buildBurndownModel({ iteration, iterations: reports, today })`.
-Burnup: `b = buildBurnupModel(iteration, today)`. Exact props the tests read:
+Burnup: `b = buildBurnupModel({ iteration, iterations: reports, today })` (Amendment B). Exact props the tests read:
 
 **Burndown** (`data.labels = m.axis` — ISO strings; datasets in this order, nothing else):
 
@@ -227,12 +228,18 @@ plotBottom: chartArea.bottom, labelHeight })`, read from the chart instance afte
 plugin `afterLayout`; update state only when positions change — avoid render loops); horizontal anchor =
 outer edge of the gutter. Labels must render (unpositioned) when there is no chart instance (SC05–SC09).
 
-**Burnup** (`data.labels = b.axis`; datasets in order): `S.legendCompleted` (`b.completed`, GREEN, `fill`
-truthy, `tension > 0`, `pointRadius` ≠ 0), `S.legendTotalScope` (`b.totalScope`, NEUTRAL, dashed,
-`pointRadius: 0`), `S.legendIdeal` (`b.ideal`, dashed), `S.legendForecast` (`b.forecast`, `--forecast`, dashed).
-Title `S.burnupTitle`. Annotations: one `{ type: 'point', xValue: date, yValue: completedAt(date) ?? 0,
-backgroundColor: <type colour: --risk if any annotation of that date is a Risk, else --info>, radius: 5 }` per distinct annotated date on the axis — **no** `label` entries, no
-text anywhere in the config, no tolerance line, no gutter (SC10–SC12). Same `onClick`.
+**Burnup** (Amendment B; `data.labels = b.axis`; datasets in order): `S.legendCompleted` (`b.completed`, GREEN,
+`fill` truthy, `cubicInterpolationMode: 'monotone'`, `pointRadius` ≠ 0, `pointBackgroundColor` red at
+`b.todayIndex`), `S.legendTotalScope` (`b.totalScope`, NEUTRAL, solid, `segment.borderDash` = `SCOPE_DASH` from
+`b.scopeProjectedFrom`, `fill: { target: 0 }` in the Remaining blue tint, `pointRadius: 0`), `S.legendIdeal`
+(`b.ideal`, dashed), `S.legendForecast` (`b.forecast`, `--forecast`, dashed). Title `S.burnupTitle`; y title
+`S.burnupYAxis`. Annotations: one `{ type: 'point', xValue: date, yValue: completedAt(date) ?? 0,
+backgroundColor: <type colour>, radius: 5 }` per distinct annotated date — no annotation text anywhere in the
+config, no callout; plus `projected-done` (orange point + `S.burnupDoneLabel` label) or `open-at-due` (orange
+vertical line on the due date + `S.burnupOpenLabel` label). Tooltip: `label` in points, `afterBody` =
+`progressLines(b, index)`, `footer` = annotation texts. Caption `data-testid="burnup-forecast"` =
+`forecastCaption(b, closed)`, also in the chart's `aria-label`. No tolerance line, no gutter (SC10–SC12c,
+SC16, SC16b, SC16c). Same `onClick`.
 
 ### 7. Annotations wiring
 
@@ -341,7 +348,7 @@ unfiltered):
 | C-9 | View switch `Burndown` / `Burnup`; titles `Burndown Chart` / `Burnup Chart` | §3.2, §13 | [M] | SR14, SC10 |
 | C-10 | Legend entries Burndown `Remaining, Ideal, Forecast`; Burnup `Completed, Total scope, Ideal, Forecast` | §3.2, §13 | [M] | SR14, SC01, SC10 |
 | C-11 | Delivery summary: `Completed` share + `{delivered} of {committed}`, `In Progress` share + pair, one decimal | §3.2, §13 | [M] | SR15 |
-| C-12 | Metrics strip `Deviation: x.x%`, `Diff: ±x.x pts` for the displayed iteration, coloured (A.6) | §12, A.6 | [M] | SR16, SR22 |
+| C-12 | Metrics strip `Deviation: x.x%`, `Diff: ±x.x pts` for the displayed iteration (open: vs the Ideal on today + `vs ideal`; closed: final totals), coloured (A.6) | §12, A.6 | [M] | SR16, SR22 |
 | C-13 | Independent regions: failed chart keeps the annotation rail; score fails in its own panel | §14.3 | [M] | SR10, SR20 |
 
 ### Predictability score presentation (§11.3)
@@ -378,9 +385,10 @@ unfiltered):
 | CH-6 | Labels in a gutter outside the plot, never in-plot | §9 | [M] | SC06 |
 | CH-7 | Gutter reserved only when ≥ 1 label | §9 | [M] | SC09 (absence), SC05 (presence) |
 | CH-8 | Label placement via `placeDeviationLabels`, anchored to the gutter's outer edge | §9 | [M] | code review (needs a real canvas) |
-| CH-9 | Burnup datasets = burnup model; Completed filled, gentle curve, dots; Total scope dashed | §7.6, ledger #8 | [M]/[KB] | SC10 |
-| CH-10 | Burnup: annotations = dots only, in the type colour (no text, no callout, no stacking) | §7.6 + STYLEGUIDE.md | [M] | SC12, SC16 |
-| CH-11 | Burnup: no tolerance line, no deviation gutter | §7.6, §9 | [A] | SC11 |
+| CH-9 | Burnup datasets = burnup model; Completed filled, monotone curve, dots, red today dot; Total scope solid, dashed when projected, shades the remaining band | Amendment B | [M] | SC10, SC16b, SC16c |
+| CH-9b | Burnup forecast joins today's Completed point; completion marker or open-at-due bracket; caption; tooltip progress lines | Amendment B | [M] | SC12b, SC12c |
+| CH-10 | Burnup: annotations = dots only, in the type colour (no text, no callout, no stacking) | Amendment B + STYLEGUIDE.md | [M] | SC12, SC16 |
+| CH-11 | Burnup: no tolerance line, no deviation gutter | Amendment B, §9 | [A] | SC11 |
 | CH-12 | Callout per annotation anchored to its point, behind the data lines; blue info / red risk | §3.6, §10.5, §13 | [M] | SC13 |
 | CH-13 | Stacking / size / push directions from `annotationGeometry` (workload units, unclamped) | §10.5, ledger #11–#12 | [M]/[KB] | domain tests + code review |
 | CH-14 | Tooltip lists all annotation texts of that date, one per line | §3.6, ledger #13 | [M] | SC14 |

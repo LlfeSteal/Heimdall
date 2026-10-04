@@ -149,7 +149,7 @@ describe('S-60: only a recorded point opens the dialogue', () => {
     const card = await waitForChart()
     await user.click(within(card).getByRole('button', { name: S.viewBurnup }))
     await waitFor(() => expect(lastLineProps().options.plugins.title.text).toBe(S.burnupTitle))
-    const model = buildBurnupModel(reportOf(ALPHA, '7'), TODAY)
+    const model = buildBurnupModel({ iteration: reportOf(ALPHA, '7'), iterations: estate.reports[ALPHA], today: TODAY })
     const empty = model.completed.findIndex((v) => v === null)
     expect(empty).toBeGreaterThan(0)
     act(() => clickChartAt(empty))

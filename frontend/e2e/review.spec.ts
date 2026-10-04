@@ -99,10 +99,18 @@ test.describe('E-R iteration review', () => {
     const tol = snap.annotations.find((a) => a.type === 'line')
     expect(tol?.yMin).toBeCloseTo(live.report!.totals.committed.weight * 0.1, 5)
 
-    // Legend + title visible on the canvas: the title text is drawn above the chart area.
-    expect(snap.chartArea.top).toBeGreaterThan(20)
+    // The title is the centred HTML heading of the chart head, above the summary and the metrics, and above
+    // the canvas (no title drawn on the canvas any more).
+    const head = page.getByTestId('chart-head')
+    await expect(head.getByRole('heading', { name: 'Burndown Chart' })).toBeVisible()
+    const headBox = (await head.boundingBox())!
+    expect(headBox.y + headBox.height).toBeLessThanOrEqual(snap.canvasRect.y + 1)
+    const titleBox = (await head.getByRole('heading').boundingBox())!
+    const cardBox = (await page.getByTestId('chart-card').boundingBox())!
+    expect(Math.abs(titleBox.x + titleBox.width / 2 - (cardBox.x + cardBox.width / 2))).toBeLessThan(4) // centred
     await expect(page.getByTestId('metrics-strip')).toContainText('Deviation:')
     await expect(page.getByTestId('metrics-strip')).toContainText('Diff:')
+    await expect(page.getByTestId('metrics-strip')).toContainText('vs ideal') // live sprint: measured against the Ideal
     await expect(page.getByTestId('delivery-summary')).toContainText('Completed')
     await expect(page.getByTestId('delivery-summary')).toContainText('In Progress')
   })
@@ -201,7 +209,15 @@ test.describe('E-R iteration review', () => {
     expect(snap.datasets[0].borderColor).toBe(COLOURS.GREEN)
     expect(snap.datasets[1].borderColor).toBe(COLOURS.NEUTRAL)
     expect(snap.datasets[3].borderColor).toBe(COLOURS.FORECAST)
-    expect(snap.annotations.filter((a) => a.type === 'line')).toHaveLength(0)
+    // No tolerance line (a horizontal line); the only line allowed is the vertical open-at-due bracket.
+    expect(snap.annotations.filter((a) => a.type === 'line' && (a.xMin === undefined || a.xMin !== a.xMax))).toHaveLength(0)
+    // Amendment B: the forecast starts on today's Completed point and the caption reads it out.
+    await expect(page.getByTestId('burnup-forecast')).toContainText('Forecast:')
+    const completed = snap.datasets[0].data as (number | null)[]
+    const forecast = snap.datasets[3].data as (number | null)[]
+    const anchor = forecast.findIndex((v) => v !== null)
+    expect(anchor).toBeGreaterThan(0)
+    expect(forecast[anchor]).toBe(completed[anchor])
     const stats = await canvasPixelStats(page)
     expect(stats.colours).toBeGreaterThan(20)
     expect(snap.dataUrlLength).toBeGreaterThan(20_000)

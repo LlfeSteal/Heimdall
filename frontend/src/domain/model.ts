@@ -83,7 +83,11 @@ export function buildBurndownModel(input: BurndownModelInput): BurndownModel {
   }
 }
 
-/** burnup(completeSeries(iteration, today) sorted ascending, iteration.dueDate). */
-export function buildBurnupModel(iteration: IterationReport, today: IsoDate): BurnupModel {
-  return burnup(sortedByDate(completeSeries(iteration, today)), iteration.dueDate)
+/**
+ * Amendment B: the burnup on the burndown's axis and forecast (same input), so both tabs tell the same story:
+ * burnup(sorted burndown series, axis, forecast, todayIndex, dueDate).
+ */
+export function buildBurnupModel(input: BurndownModelInput): BurnupModel {
+  const down = buildBurndownModel(input)
+  return burnup(sortedByDate(down.series), down.axis, down.forecast, down.todayIndex, input.iteration.dueDate)
 }

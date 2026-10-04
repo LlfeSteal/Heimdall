@@ -4,6 +4,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { buildBurndownModel } from '../domain/model'
+import { iterationMetrics, presentMetrics } from '../domain/metrics'
 import { S } from '../strings'
 import { datasetLabels, lastLineProps } from '../test/chartMock'
 import { deferred, errorReply, type Reply } from '../test/fakeApi'
@@ -208,6 +209,22 @@ describe('§3.2 / §14.3 centre column states', () => {
   })
 })
 
+describe('chart head (centred title → delivery summary → metrics strip)', () => {
+  it('SR14b the HTML title follows the view, the canvas title is hidden, and the head reads in order', async () => {
+    const { user } = renderApp()
+    await openCard(user, 'Alpha')
+    const card = await waitForChart()
+    const head = within(card).getByTestId('chart-head')
+    expect(within(head).getByRole('heading', { name: S.burndownTitle })).toBeInTheDocument()
+    expect(lastLineProps().options.plugins.title.display).toBe(false)
+    const order = [...head.children].map((el) => el.getAttribute('data-testid') ?? el.tagName.toLowerCase())
+    expect(order).toEqual(['h3', 'delivery-summary', 'metrics-strip'])
+    await user.click(within(card).getByRole('button', { name: S.viewBurnup }))
+    await waitFor(() => expect(within(head).getByRole('heading', { name: S.burnupTitle })).toBeInTheDocument())
+    expect(lastLineProps().options.plugins.title.display).toBe(false)
+  })
+})
+
 describe('§3.2 delivery summary strip and §12 metrics strip', () => {
   it('SR15 summary: green `Completed` share + `{delivered} of {committed}`, blue `In Progress` share + pair (one decimal)', async () => {
     const { user } = renderApp()
@@ -219,18 +236,27 @@ describe('§3.2 delivery summary strip and §12 metrics strip', () => {
     expect(text).toMatch(/Completed.*90%.*45\.0 of 50\.0.*In Progress.*10%.*5\.0 of 50\.0/)
   })
 
-  it('SR16 metrics strip describes the DISPLAYED iteration: `Deviation: x.x%` and `Diff: ±x.x pts`, coloured (A.6)', async () => {
+  it('SR16 metrics strip describes the DISPLAYED iteration: open → vs the Ideal on today, closed → final totals; coloured (A.6)', async () => {
     const { user } = renderApp()
     await openCard(user, 'Alpha')
-    let card = await waitForChart() // Sprint 7: committed 50, delivered 20
+    // Sprint 7 is live: measured against the burndown Ideal on today, not on the final totals (60% / +30).
+    let card = await waitForChart()
     let strip = within(card).getByTestId('metrics-strip')
-    expect(within(strip).getByText('Deviation: 60.0%')).toHaveAttribute('data-tone', 'poor')
-    expect(within(strip).getByText('Diff: +30.0 pts')).toHaveAttribute('data-tone', 'poor')
-    await selectIteration(user, 'Sprint 6') // committed 50, delivered 45
+    const live = iterationMetrics({ ...reportOf(ALPHA, '7'), report: reportOf(ALPHA, '7').report! }, TODAY)
+    const burndown = buildBurndownModel({ iteration: reportOf(ALPHA, '7'), iterations: estate.reports[ALPHA], today: TODAY })
+    expect(live.vsIdeal).toBe(true)
+    expect(live.difference).toBeCloseTo(burndown.remaining[burndown.todayIndex]! - burndown.ideal[burndown.todayIndex]!, 9)
+    const shown = presentMetrics(live)
+    expect(within(strip).getByText(shown.deviationText)).toHaveAttribute('data-tone', shown.deviationTone)
+    expect(within(strip).getByText(shown.diffText)).toHaveAttribute('data-tone', shown.diffTone)
+    expect(within(strip).getByText(S.metricsVsIdeal)).toBeInTheDocument()
+    expect(within(strip).queryByText('Deviation: 60.0%')).toBeNull()
+    await selectIteration(user, 'Sprint 6') // closed: committed 50, delivered 45 — final totals
     card = await waitForChart()
     strip = within(card).getByTestId('metrics-strip')
     expect(await within(strip).findByText('Deviation: 10.0%')).toHaveAttribute('data-tone', 'good')
     expect(within(strip).getByText('Diff: +5.0 pts')).toHaveAttribute('data-tone', 'caution')
+    expect(within(strip).queryByText(S.metricsVsIdeal)).toBeNull()
     await selectIteration(user, 'Sprint 3') // committed 20, delivered 21 → over-delivered
     strip = within(await waitForChart()).getByTestId('metrics-strip')
     expect(await within(strip).findByText('Deviation: 5.0%')).toHaveAttribute('data-tone', 'good')
@@ -341,13 +367,19 @@ describe('§5.2 / §14.2 what is read, and what Refresh re-reads', () => {
     const { api, user } = renderApp({
       override: (c) => (c.path === '/api/reports' && c.refresh ? { body: refreshed } : undefined),
     })
+    // The live sprint's strip is measured against the Ideal on today: it moves with the refreshed totals.
+    const deviationOf = (it: (typeof refreshed)[number]) =>
+      presentMetrics(iterationMetrics({ ...it, report: it.report! }, TODAY)).deviationText
+    const before = deviationOf(estate.reports[ALPHA].find((r) => r.iid === '7')!)
+    const after = deviationOf(live)
+    expect(after).not.toBe(before)
     await openCard(user, 'Alpha')
     const card = await waitForChart()
-    expect(within(card).getByText('Deviation: 60.0%')).toBeInTheDocument()
+    expect(within(card).getByText(before)).toBeInTheDocument()
     const iterationsBefore = api.count('/api/iterations')
     const groupsBefore = api.count('/api/groups')
     await user.click(within(header()).getByRole('button', { name: S.refresh }))
-    expect(await within(screen.getByTestId('chart-card')).findByText('Deviation: 50.0%')).toBeInTheDocument()
+    expect(await within(screen.getByTestId('chart-card')).findByText(after)).toBeInTheDocument()
     expect(api.count('/api/reports', { group: ALPHA, refresh: true })).toBe(1)
     expect(api.count('/api/iterations')).toBe(iterationsBefore)
     expect(api.count('/api/groups')).toBe(groupsBefore)

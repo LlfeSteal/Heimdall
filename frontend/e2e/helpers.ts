@@ -130,7 +130,7 @@ export interface ChartSnapshot {
   datasets: { label: string; data: (number | null)[]; borderColor: unknown; pointBackgroundColor: unknown; borderDash: unknown }[]
   /** Page-coordinate centre of each Remaining/Completed point (dataset 0). */
   points: { x: number; y: number; skip: boolean }[]
-  annotations: { id: string; type: string; content: unknown; drawTime: unknown; backgroundColor: unknown; borderColor: unknown; yMin: unknown }[]
+  annotations: { id: string; type: string; content: unknown; drawTime: unknown; backgroundColor: unknown; borderColor: unknown; yMin: unknown; yMax: unknown; xMin: unknown; xMax: unknown }[]
   legend: string[]
   dataUrlLength: number
   /** Pixel y of `value` on the y scale, in page coordinates. */
@@ -188,6 +188,9 @@ export async function chartSnapshot(page: Page, yValues: number[] = []): Promise
         backgroundColor: a.backgroundColor,
         borderColor: a.borderColor,
         yMin: a.yMin,
+        yMax: a.yMax,
+        xMin: a.xMin,
+        xMax: a.xMax,
       })),
       legend: (chart.legend?.legendItems ?? []).map((i: { text: string }) => i.text),
       dataUrlLength: canvas.toDataURL('image/png').length,

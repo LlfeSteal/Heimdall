@@ -3,7 +3,8 @@
 // Contract: docs/conformance/screens.md
 import { screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { readChartTheme } from '../components/chartSetup'
+import { SCOPE_DASH, readChartTheme } from '../components/chartSetup'
+import { forecastCaption, progressLines } from '../domain/burnupReading'
 import { buildBurndownModel, buildBurnupModel } from '../domain/model'
 import { S } from '../strings'
 import {
@@ -33,6 +34,9 @@ afterEach(resetTestEnvironment)
 
 const burndown = (group: string, iid: string) =>
   buildBurndownModel({ iteration: reportOf(group, iid), iterations: estate.reports[group], today: TODAY })
+
+const burnupOf = (group: string, iid: string) =>
+  buildBurnupModel({ iteration: reportOf(group, iid), iterations: estate.reports[group], today: TODAY })
 
 const isDashed = (d: Record<string, unknown>) => Array.isArray(d.borderDash) && d.borderDash.length > 0
 
@@ -171,23 +175,27 @@ describe('§7.5 tolerance line and §9 / §15.6 deviation labels in the gutter',
   })
 })
 
-describe('§7.6 burnup view', () => {
-  it('SC10 datasets = the burnup model: Completed (filled, gentle curve, dots), Total scope (dashed), Ideal, Forecast (dashed)', async () => {
+describe('Amendment B burnup view', () => {
+  it('SC10 datasets = the burnup model: Completed (filled, gentle curve, dots), Total scope (solid, dashed when projected, shades the remaining work), Ideal, Forecast (dashed)', async () => {
     const { user } = renderApp()
     await openCard(user, 'Alpha')
     const card = await waitForChart()
     await user.click(within(card).getByRole('button', { name: S.viewBurnup }))
     await waitFor(() => expect(lastLineProps().options.plugins.title.text).toBe(S.burnupTitle))
-    const model = buildBurnupModel(reportOf(ALPHA, '7'), TODAY)
+    const model = burnupOf(ALPHA, '7')
     expect(lastLineProps().data.labels).toEqual(model.axis)
     const completed = datasetByLabel(S.legendCompleted)
     expect(completed.data).toEqual(model.completed)
     expect(completed.fill).toBeTruthy()
-    expect(completed.tension).toBeGreaterThan(0)
+    expect(completed.cubicInterpolationMode).toBe('monotone') // a gentle curve that never overshoots
     expect(completed.pointRadius).not.toBe(0)
     const scope = datasetByLabel(S.legendTotalScope)
     expect(scope.data).toEqual(model.totalScope)
-    expect(isDashed(scope)).toBe(true)
+    expect(isDashed(scope)).toBe(false)
+    expect(scope.fill).toMatchObject({ target: 0 }) // the band down to Completed = the remaining work
+    const segmentDash = (p0DataIndex: number) => scope.segment.borderDash({ p0DataIndex })
+    expect(segmentDash(model.scopeProjectedFrom - 1)).toBeUndefined()
+    expect(segmentDash(model.scopeProjectedFrom)).toEqual(SCOPE_DASH)
     expect(datasetByLabel(S.legendIdeal).data).toEqual(model.ideal)
     expect(isDashed(datasetByLabel(S.legendIdeal))).toBe(true)
     expect(datasetByLabel(S.legendForecast).data).toEqual(model.forecast)
@@ -213,8 +221,67 @@ describe('§7.6 burnup view', () => {
     await waitFor(() => expect(lastLineProps().options.plugins.title.text).toBe(S.burnupTitle))
     const entries = annotationEntries()
     expect(entries.filter((e) => e.type === 'point' && e.xValue === '2026-03-05')).toHaveLength(1)
-    expect(entries.filter((e) => e.type === 'label')).toHaveLength(0)
+    expect(entries.filter((e) => e.type === 'label' && e.callout?.display)).toHaveLength(0)
     expect(JSON.stringify(entries)).not.toContain('Scope added by PO')
+  })
+
+  it('SC12b forecast joins today\'s Completed point; its completion marker or open-at-due bracket is drawn; caption above', async () => {
+    const { user } = renderApp()
+    await openCard(user, 'Alpha')
+    const card = await waitForChart()
+    await user.click(within(card).getByRole('button', { name: S.viewBurnup }))
+    await waitFor(() => expect(lastLineProps().options.plugins.title.text).toBe(S.burnupTitle))
+    const model = burnupOf(ALPHA, '7')
+    expect(model.forecast[model.todayIndex]).toBe(model.completed[model.todayIndex])
+    // The fixture's live Sprint 7 does not finish in time: the open-at-due bracket (completion: domain tests).
+    expect(model.projectedDone).toBeNull()
+    expect(model.openAtDue).not.toBeNull()
+    const entries = annotationEntries()
+    const theme = readChartTheme()
+    const due = model.axis[model.axis.length - 1]
+    const reached = model.forecast[model.axis.length - 1]!
+    const bracket = entries.find((e) => e.type === 'line' && e.xMin === due && e.xMax === due)
+    expect(bracket).toMatchObject({ yMin: reached, yMax: reached + model.openAtDue!, borderColor: theme.forecast })
+    expect(entries.some((e) => e.type === 'label' && e.content === S.burnupOpenLabel(`${model.openAtDue!.toFixed(1)} ${S.pts}`))).toBe(true)
+    expect(entries.some((e) => e.type === 'label' && String(e.content).startsWith('Done'))).toBe(false)
+    const caption = forecastCaption(model, false)!
+    expect(within(card).getByTestId('burnup-forecast')).toHaveTextContent(caption)
+    expect(lastLineProps()['aria-label']).toContain(caption)
+  })
+
+  it('SC12d closed iteration: factual caption (no "Forecast:" wording), no today dot', async () => {
+    const { user } = renderApp()
+    await openCard(user, 'Alpha')
+    const card = await waitForChart()
+    await selectIteration(user, 'Sprint 6')
+    await user.click(within(card).getByRole('button', { name: S.viewBurnup }))
+    await waitFor(() => expect(lastLineProps().options.plugins.title.text).toBe(S.burnupTitle))
+    const model = burnupOf(ALPHA, '6')
+    expect(model.todayIndex).toBe(-1)
+    const caption = forecastCaption(model, true)
+    if (caption === null) expect(within(card).queryByTestId('burnup-forecast')).toBeNull()
+    else {
+      expect(caption).not.toContain('Forecast:')
+      await waitFor(() => expect(within(card).getByTestId('burnup-forecast')).toHaveTextContent(caption))
+    }
+  })
+
+  it('SC12c burnup tooltip: values in pts, then Remaining and % complete, then the annotation texts', async () => {
+    const { user } = renderApp()
+    await openCard(user, 'Alpha')
+    const card = await waitForChart()
+    await annotate(user, '2026-03-05', 'Scope added by PO')
+    await user.click(within(card).getByRole('button', { name: S.viewBurnup }))
+    await waitFor(() => expect(lastLineProps().options.plugins.title.text).toBe(S.burnupTitle))
+    const model = burnupOf(ALPHA, '7')
+    const i = model.axis.indexOf('2026-03-05')
+    const callbacks = lastLineProps().options.plugins.tooltip.callbacks
+    const item = { dataIndex: i, dataset: { label: S.legendCompleted }, parsed: { y: model.completed[i] } }
+    expect(callbacks.label(item)).toBe(`${S.legendCompleted}: ${model.completed[i]!.toFixed(1)} ${S.pts}`)
+    const lines = callbacks.afterBody([item])
+    expect(lines).toEqual(progressLines(model, i))
+    expect(lines[0]).toBe(S.tooltipRemaining(`${(model.totalScope[i]! - model.completed[i]!).toFixed(1)} ${S.pts}`))
+    expect(callbacks.footer([item])).toEqual(['Scope added by PO'])
   })
 })
 
@@ -286,7 +353,7 @@ describe('STYLEGUIDE.md colours on the canvas (no colour in code; dark mode)', (
     expect(marker('2026-03-09').backgroundColor).toBe(theme.risk)
   })
 
-  it('SC16b burnup Total scope has its own dash, distinct from Ideal (both gray-ish references)', async () => {
+  it('SC16b burnup Total scope: its projected part has its own dash, distinct from Ideal', async () => {
     const { user } = renderApp()
     await openCard(user, 'Alpha')
     const card = await waitForChart()
@@ -294,9 +361,22 @@ describe('STYLEGUIDE.md colours on the canvas (no colour in code; dark mode)', (
     await waitFor(() => expect(lastLineProps().options.plugins.title.text).toBe(S.burnupTitle))
     const scope = datasetByLabel(S.legendTotalScope)
     const ideal = datasetByLabel(S.legendIdeal)
-    expect(isDashed(scope)).toBe(true)
     expect(isDashed(ideal)).toBe(true)
-    expect(scope.borderDash).not.toEqual(ideal.borderDash)
+    expect(scope.segment.borderDash({ p0DataIndex: burnupOf(ALPHA, '7').scopeProjectedFrom })).not.toEqual(ideal.borderDash)
+  })
+
+  it('SC16c burnup today dot is red, the other Completed dots green', async () => {
+    const { user } = renderApp()
+    await openCard(user, 'Alpha')
+    const card = await waitForChart()
+    await user.click(within(card).getByRole('button', { name: S.viewBurnup }))
+    await waitFor(() => expect(lastLineProps().options.plugins.title.text).toBe(S.burnupTitle))
+    const theme = readChartTheme()
+    const model = burnupOf(ALPHA, '7')
+    expect(model.todayIndex).toBeGreaterThan(0)
+    const colours = datasetByLabel(S.legendCompleted).pointBackgroundColor as string[]
+    expect(colours[model.todayIndex]).toBe(theme.today)
+    expect(colours[0]).toBe(theme.delivered)
   })
 
   it('SC17 choosing Dark re-themes the chart from the dark tokens (series, today dot, callouts)', async () => {

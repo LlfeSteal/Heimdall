@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { deliveryMetrics, deliverySummary, presentMetrics } from './metrics'
-import { makeReport } from './testkit'
+import { deliveryMetrics, deliverySummary, iterationMetrics, presentMetrics } from './metrics'
+import { makeReport, pt } from './testkit'
 
 describe('§12 delivery metrics strip', () => {
   it('deviation = |committed − delivered| / committed × 100; difference = committed − delivered', () => {
@@ -58,5 +58,46 @@ describe('§3.2 delivery summary strip', () => {
     expect(s.inProgressPercent).toBe(0)
     expect(s.completedShare).toBe('0%')
     expect(s.completedOf).toBe('2.0 of 0.0')
+  })
+})
+
+describe('§12 open iterations are measured against the burndown Ideal on today', () => {
+  // 40 pts over 03-02 → 03-06 (4 days): ideal remaining 40, 30, 20, 10, 0.
+  const live = (todayRemaining: number) => ({
+    state: 'current',
+    dueDate: '2026-03-06',
+    report: makeReport([pt('2026-03-02', 40, 0), pt('2026-03-03', 40, 5)], 40, 40 - todayRemaining, todayRemaining),
+  })
+
+  it('behind the ideal: Diff = actual − ideal remaining (positive), Deviation = |Diff| / committed', () => {
+    // today 03-04: ideal 20, actual (today point = in-progress total) 26
+    const m = iterationMetrics(live(26), '2026-03-04')
+    expect(m.vsIdeal).toBe(true)
+    expect(m.difference).toBe(6)
+    expect(m.deviation).toBe(15)
+  })
+
+  it('ahead of the ideal: negative Diff', () => {
+    const m = iterationMetrics(live(14), '2026-03-04')
+    expect(m.difference).toBe(-6)
+    expect(m.deviation).toBe(15)
+    expect(presentMetrics(m).diffText).toBe('Diff: -6.0 pts')
+  })
+
+  it('closed iteration: final totals (committed − delivered), no "vs ideal"', () => {
+    const closed = { ...live(26), state: 'closed' }
+    expect(iterationMetrics(closed, '2026-03-04')).toEqual({ ...deliveryMetrics(closed.report), vsIdeal: false })
+  })
+
+  it('no recorded point yet: today\'s repaired point starts the ideal, so the iteration is on it (Diff 0)', () => {
+    const fresh = { ...live(26), report: makeReport([], 40, 14, 26) }
+    const m = iterationMetrics(fresh, '2026-03-04')
+    expect(m.vsIdeal).toBe(true)
+    expect(m.difference).toBe(0)
+  })
+
+  it('no committed workload → deviation 0', () => {
+    const empty = { state: 'current', dueDate: '2026-03-06', report: makeReport([pt('2026-03-02', 0, 0)], 0, 0, 0) }
+    expect(iterationMetrics(empty, '2026-03-04').deviation).toBe(0)
   })
 })

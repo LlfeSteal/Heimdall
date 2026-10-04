@@ -142,9 +142,12 @@ export function axisStyle(t: ChartTheme) {
   }
 }
 
-/** Chart title: 13 / 600 in the text colour. */
-export function titleStyle(t: ChartTheme, text: string) {
-  return { display: true, text, color: t.text, font: { family: t.font, size: 13, weight: 600 as const } }
+/**
+ * Chart title: 13 / 600 in the text colour. The review screen shows the title as an HTML heading above the
+ * delivery summary (so the canvas one is hidden there); the text stays configured on the chart.
+ */
+export function titleStyle(t: ChartTheme, text: string, display = true) {
+  return { display, text, color: t.text, font: { family: t.font, size: 13, weight: 600 as const } }
 }
 
 /** Tooltip (§7): near-opaque popover surface, radius 10, padding 12 × 14, 13 / 600 title and 12 px lines. */
@@ -166,7 +169,7 @@ export function tooltipStyle(t: ChartTheme) {
 }
 
 /**
- * Legend swatches drawn as what they stand for: a dashed series as a dashed line, a filled series as a box
+ * Legend swatches drawn as what they stand for: a dashed (or line-styled) series as a line, a filled series as a box
  * (instead of Chart.js's solid block for every series). 12 px secondary text, 16 px apart (§7 Legend).
  */
 export function legendStyle(t: ChartTheme) {
@@ -183,12 +186,15 @@ export function legendStyle(t: ChartTheme) {
       generateLabels: (chart: Chart) =>
         Chart.defaults.plugins.legend.labels.generateLabels(chart).map((item) => {
           // With usePointStyle Chart.js styles the swatch from a point, which carries no dash: take the series'.
-          const dash = (chart.data.datasets[item.datasetIndex ?? 0] as { borderDash?: number[] }).borderDash ?? []
+          const dataset = chart.data.datasets[item.datasetIndex ?? 0] as { borderDash?: number[]; pointStyle?: unknown }
+          const dash = dataset.borderDash ?? []
+          // A dashed series, or one that declares itself a line (pointStyle 'line'), gets a line swatch.
+          const line = dash.length > 0 || dataset.pointStyle === 'line'
           return {
             ...item,
             fontColor: t.textSecondary,
             lineDash: dash,
-            pointStyle: dash.length ? ('line' as const) : ('rectRounded' as const),
+            pointStyle: line ? ('line' as const) : ('rectRounded' as const),
           }
         }),
     },

@@ -41,12 +41,26 @@ export const S = {
   legendCompleted: 'Completed',
   legendTotalScope: 'Total scope',
 
+  // Burnup (Amendment B)
+  burnupYAxis: 'Weight (pts)',
+  burnupDoneLabel: (date: string) => `Done ≈ ${date}`,
+  burnupOpenLabel: (points: string) => `${points} open`,
+  burnupForecastDone: (date: string, daysBeforeDue: number) =>
+    daysBeforeDue > 0
+      ? `Forecast: all work done by ${date}, ${daysBeforeDue} ${daysBeforeDue === 1 ? 'day' : 'days'} before the due date.`
+      : `Forecast: all work done by ${date}, on the due date.`,
+  burnupForecastOpen: (points: string, due: string) => `Forecast: ${points} still open on the due date (${due}).`,
+  burnupClosedOpen: (points: string, due: string) => `${points} left open on the due date (${due}).`,
+  tooltipRemaining: (points: string) => `Remaining: ${points}`,
+  tooltipComplete: (share: string) => `${share} complete`,
+
   summaryCompleted: 'Completed',
   summaryInProgress: 'In Progress',
   summaryOf: (part: string, whole: string) => `${part} of ${whole}`,
 
   metricsDeviation: 'Deviation:',
   metricsDiff: 'Diff:',
+  metricsVsIdeal: 'vs ideal',
 
   // Predictability score (§11.3)
   scoreLoading: 'Predictability scores...',

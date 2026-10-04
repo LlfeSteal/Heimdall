@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   axisMetrics,
   buildAxis,
-  buildBurnupAxis,
   burnup,
   committedTotal,
   completeSeries,
@@ -257,67 +256,134 @@ describe('§7.5 committedTotal and tolerance', () => {
   })
 })
 
-describe('§7.6 burnup (KNOWN BEHAVIOUR formulas, ledger #8)', () => {
-  // first committed = 2 ⇒ slope 2/day, visible before saturation
-  const small = [pt('2026-03-02', 2, 0), pt('2026-03-03', 10, 1), pt('2026-03-04', 12, 3)]
+describe('Amendment B burnup (GitLab / Jira burnup, burndown forecast mirrored)', () => {
+  // Scope grows 40 → 44 on the 4th; due the 8th; today = the 4th.
+  const series = [pt('2026-03-02', 40, 0), pt('2026-03-03', 40, 10), pt('2026-03-04', 44, 20)]
+  const axis = buildAxis(series, '2026-03-08')
+  // Burndown forecast (remaining) anchored on today = position 2.
+  const finishing = [null, null, 24, 16, 8, 0, 0]
+  const late = [null, null, 24, 20, 16, 12, 10]
 
-  it('axis = series dates + up to 7 days after the last point (all on or before the due date)', () => {
-    expect(buildBurnupAxis(small, '2026-03-13')).toEqual(days('2026-03-02', 10))
+  it('axis = the burndown axis: first point → due date (no 7-day cap)', () => {
+    expect(burnup(series, axis, finishing, 2, '2026-03-08').axis).toEqual(days('2026-03-02', 7))
   })
 
-  it('axis extension stops at the due date', () => {
-    expect(buildBurnupAxis(small, '2026-03-07')).toEqual(days('2026-03-02', 6))
+  it('completed = delivered per date; total scope = committed per date, then the last scope carried forward', () => {
+    const m = burnup(series, axis, finishing, 2, '2026-03-08')
+    expectValues(m.completed, [0, 10, 20, null, null, null, null])
+    expectValues(m.totalScope, [40, 40, 44, 44, 44, 44, 44])
+    expect(m.scopeProjectedFrom).toBe(2)
   })
 
-  it('no extension when the due date is before the last point, or there is no due date', () => {
-    expect(buildBurnupAxis(small, '2026-03-03')).toEqual(days('2026-03-02', 3))
-    expect(buildBurnupAxis(small, null)).toEqual(days('2026-03-02', 3))
+  it('ideal (guideline) rises from 0 to the first point\'s committed, exactly on the due date', () => {
+    const m = burnup(series, axis, finishing, 2, '2026-03-08')
+    expectValues(m.ideal, [0, 40 / 6, 80 / 6, 20, 160 / 6, 200 / 6, 40])
+    expect(m.ideal[0]).toBe(0)
+    expect(m.ideal[6]).toBe(40)
   })
 
-  it('completed, total scope (constant maxScope) and the per-day forecast slope = first point committed', () => {
-    const m = burnup(small, '2026-03-13')
-    expect(m.axis).toEqual(days('2026-03-02', 10))
-    expect(m.maxScope).toBe(12)
-    expectValues(m.completed, [0, 1, 3, null, null, null, null, null, null, null])
-    expect(m.totalScope).toEqual(Array(10).fill(12))
-    // min(12, 3 + 2 × daysAfterLast): 5, 7, 9, 11, then capped at 12
-    expectValues(m.forecast, [null, null, null, 5, 7, 9, 11, 12, 12, 12])
+  it('forecast starts ON today\'s Completed point (the join) and climbs by the work the burndown burns', () => {
+    const m = burnup(series, axis, finishing, 2, '2026-03-08')
+    expectValues(m.forecast, [null, null, 20, 28, 36, 44, 44])
+    expect(m.forecast[2]).toBe(m.completed[2])
+    for (let i = 3; i < m.forecast.length; i++) expect(m.forecast[i]!).toBeGreaterThanOrEqual(m.forecast[i - 1]!)
+    expect(m.todayIndex).toBe(2)
   })
 
-  it('ideal DESCENDS from the first point\'s remaining (burndown formula reused on the burnup axis)', () => {
-    const m = burnup(small, '2026-03-13')
-    // firstRemaining = 2, totalDays = 9
-    expectValues(m.ideal, Array.from({ length: 10 }, (_, i) => 2 - (2 / 9) * i))
-    expect(m.ideal[9]).toBe(0)
+  it('projected completion = first position after the anchor where the forecast remaining reaches 0', () => {
+    const m = burnup(series, axis, finishing, 2, '2026-03-08')
+    expect(m.projectedDone).toEqual({ index: 5, date: '2026-03-07' })
+    expect(m.openAtDue).toBeNull()
+    expect(m.forecast[5]).toBe(m.totalScope[5]) // meets the Total line
   })
 
-  it('realistic data: forecast saturates at maxScope on the very first projected day', () => {
-    const series = [pt('2026-03-02', 40, 0), pt('2026-03-03', 40, 4), pt('2026-03-04', 44, 6)]
-    const m = burnup(series, '2026-03-07')
-    expect(m.maxScope).toBe(44)
-    expectValues(m.forecast, [null, null, null, 44, 44, 44])
-    expectValues(m.ideal, [40, 32, 24, 16, 8, 0])
+  it('never completing → work still open on the due date', () => {
+    const m = burnup(series, axis, late, 2, '2026-03-08')
+    expect(m.projectedDone).toBeNull()
+    expect(m.openAtDue).toBe(10)
+    expectValues(m.forecast, [null, null, 20, 24, 28, 32, 34])
   })
 
-  it('no projected positions → forecast all null', () => {
-    expectValues(burnup(small, null).forecast, [null, null, null])
+  it('already done at the anchor → neither a completion marker nor open work', () => {
+    const done = [pt('2026-03-02', 10, 0), pt('2026-03-03', 10, 10)]
+    const m = burnup(done, buildAxis(done, '2026-03-05'), [null, 0, 0, 0], 1, '2026-03-05')
+    expect(m.projectedDone).toBeNull()
+    expect(m.openAtDue).toBeNull()
+    expectValues(m.forecast, [null, 10, 10, 10])
   })
 
-  it('a zero span → ideal is null everywhere (unlike the burndown ideal)', () => {
-    const m = burnup([pt('2026-03-02', 10, 4)], '2026-03-02')
-    expect(m.axis).toEqual(['2026-03-02'])
+  it('closed iteration (closed extension anchored on the last point): the forecast is that single point', () => {
+    const closed = [pt('2026-03-02', 40, 0), pt('2026-03-03', 40, 20), pt('2026-03-04', 40, 34)]
+    const m = burnup(closed, buildAxis(closed, '2026-03-04'), [null, null, 6], -1, '2026-03-04')
+    expectValues(m.forecast, [null, null, 34])
+    expect(m.openAtDue).toBe(6)
+    expect(m.todayIndex).toBe(-1)
+  })
+
+  it('no forecast, or no Completed value at the anchor → forecast all null', () => {
+    expectValues(burnup(series, axis, [], 2, '2026-03-08').forecast, Array(7).fill(null))
+    expectValues(burnup(series, axis, [null, null, null, 5, 0], 3, '2026-03-08').forecast, Array(7).fill(null))
+  })
+
+  it('a zero span → ideal null everywhere', () => {
+    const one = [pt('2026-03-02', 10, 4)]
+    const m = burnup(one, buildAxis(one, '2026-03-02'), [], -1, '2026-03-02')
     expectValues(m.ideal, [null])
-    expectValues(m.forecast, [null])
     expectValues(m.completed, [4])
+    expectValues(m.totalScope, [10])
   })
 
-  it('empty series → empty model', () => {
-    const m = burnup([], '2026-03-13')
+  it('repaired point whose remaining (in-progress total) ≠ committed − delivered: the forecast still meets Total', () => {
+    // today: committed 100, delivered 40, remaining 30 (in progress) — 30 pts are unaccounted for.
+    const repaired = [pt('2026-03-02', 100, 0), pt('2026-03-03', 100, 40, 30)]
+    const ax = buildAxis(repaired, '2026-03-06')
+    const done = burnup(repaired, ax, [null, 30, 15, 0, 0], 1, '2026-03-06')
+    expectValues(done.forecast, [null, 40, 70, 100, 100])
+    expect(done.projectedDone).toEqual({ index: 3, date: '2026-03-05' })
+    const late = burnup(repaired, ax, [null, 30, 24, 18, 15], 1, '2026-03-06')
+    expectValues(late.forecast, [null, 40, 52, 64, 70])
+    expect(late.openAtDue).toBe(30) // = Total − Forecast on the due date: the bracket's height
+  })
+
+  it('a negative remaining at the anchor (§7.1) → forecast flat at Completed, never below it', () => {
+    const over = [pt('2026-03-02', 10, 0), pt('2026-03-03', 10, 15)]
+    const m = burnup(over, buildAxis(over, '2026-03-05'), [null, -5, 0, 0], 1, '2026-03-05')
+    expectValues(m.forecast, [null, 15, 15, 15])
+    expect(m.projectedDone).toBeNull()
+    expect(m.openAtDue).toBeNull()
+  })
+
+  it('nulls in the forecast after the anchor stay gaps', () => {
+    const m = burnup(series, axis, [null, null, 24, null, 12, null, 6], 2, '2026-03-08')
+    expectValues(m.forecast, [null, null, 20, null, 32, null, 38])
+    expect(m.openAtDue).toBe(6)
+  })
+
+  it('open work is only reported ON the due date: none when the axis ends elsewhere or there is no due date', () => {
+    // closed iteration with a point after its due date: the axis ends on 03-05, not on the due date 03-04
+    const late = [pt('2026-03-02', 40, 0), pt('2026-03-03', 40, 20), pt('2026-03-05', 40, 34)]
+    const ax = buildAxis(late, '2026-03-04')
+    expect(ax[ax.length - 1]).toBe('2026-03-05')
+    expect(burnup(late, ax, [null, null, null, 6], -1, '2026-03-04').openAtDue).toBeNull()
+    expect(burnup(late, buildAxis(late, null), [null, null, 6], -1, null).openAtDue).toBeNull()
+  })
+
+  it('due date before the first point: the guideline still ends on the last axis position; scope has a gap there', () => {
+    const early = [pt('2026-03-03', 20, 0), pt('2026-03-04', 20, 5)]
+    const ax = buildAxis(early, '2026-03-02')
+    expect(ax).toEqual(['2026-03-02', '2026-03-03', '2026-03-04'])
+    const m = burnup(early, ax, [], -1, '2026-03-02')
+    expectValues(m.totalScope, [null, 20, 20])
+    expectValues(m.ideal, [null, 0, 20])
+  })
+
+  it('empty series → empty series everywhere', () => {
+    const m = burnup([], [], [], -1, null)
     expect(m.axis).toEqual([])
-    expect(m.maxScope).toBe(0)
     expect(m.completed).toEqual([])
     expect(m.totalScope).toEqual([])
     expect(m.ideal).toEqual([])
     expect(m.forecast).toEqual([])
+    expect(m.scopeProjectedFrom).toBe(-1)
   })
 })

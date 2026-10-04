@@ -88,13 +88,23 @@ describe('burndown model wiring (§7–§9)', () => {
   })
 })
 
-describe('burnup model wiring (§7.6)', () => {
-  it('uses the repaired series (today point included) and the 7-day extension', () => {
-    const { selected } = liveScenario()
-    const m = buildBurnupModel(selected, '2026-03-06')
-    expect(m.axis).toEqual(days('2026-03-01', 11))
+describe('burnup model wiring (Amendment B)', () => {
+  it('shares the burndown axis and forecast: the burnup forecast joins today\'s Completed point', () => {
+    const { selected, iterations } = liveScenario()
+    const input = { iteration: selected, iterations, today: '2026-03-06' }
+    const down = buildBurndownModel(input)
+    const m = buildBurnupModel(input)
+    expect(m.axis).toEqual(down.axis)
+    expect(m.todayIndex).toBe(5)
     expectValues(m.completed, [0, 10, 20, 30, 40, 50, null, null, null, null, null])
-    expect(m.maxScope).toBe(100)
-    expectValues(m.forecast, [null, null, null, null, null, null, 100, 100, 100, 100, 100])
+    expectValues(m.totalScope, Array(11).fill(100))
+    expect(m.forecast[5]).toBe(50)
+    // mirror of the burndown forecast: completed(today) + (R(today) − R(i))
+    expectValues(
+      m.forecast,
+      down.forecast.map((r, i) => (i < 5 || r === null ? null : 50 + (50 - r))),
+    )
+    expect(m.projectedDone).toBeNull()
+    expect(m.openAtDue).toBeCloseTo(down.forecast[10]!, 9)
   })
 })
