@@ -24,15 +24,15 @@ restate the spec formula precisely.
 | `dates.ts` | `type IsoDate`; `todayUtc(now?: Date): IsoDate`; `addDays(date, days): IsoDate`; `daysBetween(from, to): number` — all UTC calendar-day arithmetic |
 | `state.ts` | `isClosed(state)`; `isLive(state)` (= `!isClosed`; unknown/null/undefined are live) |
 | `stats.ts` | `median(values)` (even → mean of middle two; `[]` → 0; no mutation); `mean(values)` (`[]` → 0) |
-| `curve.ts` | `type Value = number \| null`; `interface CurveIteration {state, dueDate, report}`; `withTodayPoint(series, iteration, today)`; `withDueDatePoint(series, iteration)`; `completeSeries(iteration, today)`; `buildAxis(series, dueDate)`; `axisMetrics(axis, series): {firstIndex, totalDays}`; `remainingSeries(series, axis)`; `idealSeries(series, axis)`; `TOLERANCE_RATIO = 0.1`; `committedTotal(report, series)`; `toleranceLevel(committedTotal): number \| null`; `BURNUP_EXTENSION_DAYS = 7`; `buildBurnupAxis(series, dueDate)`; `interface BurnupModel {axis, maxScope, completed, totalScope, ideal, forecast}`; `burnup(series, dueDate): BurnupModel` |
+| `curve.ts` | `type Value = number \| null`; `interface CurveIteration {state, dueDate, report}`; `withTodayPoint(series, iteration, today)`; `withDueDatePoint(series, iteration)`; `completeSeries(iteration, today)`; `buildAxis(series, dueDate)`; `axisMetrics(axis, series): {firstIndex, totalDays}`; `remainingSeries(series, axis)`; `idealSeries(series, axis)`; `TOLERANCE_RATIO = 0.1`; `committedTotal(report, series)`; `toleranceLevel(committedTotal): number \| null`; `interface BurnupModel {axis, completed, totalScope, scopeProjectedFrom, ideal, forecast, projectedDone, openAtDue, todayIndex}`; `burnup(series, axis, forecastRemaining, todayIndex): BurnupModel` (Amendment B) |
 | `forecast.ts` | constants `TREND_WINDOW = 5`, `HISTORY_MAX = 4`, `SHAPE_GRID_POINTS = 21`, `SHAPE_COLLAPSE_EPSILON = 1e-9`; `NOT_USABLE` (unique symbol) + `type NotUsable`; `type ForecastSeries = Value[]`; `ShapePoint {f, y}`, `Shape`; `type History = SeriesPoint[][]`; `dailyDirection(series, window = 5)`; `shapeOf(series): Shape \| null`; `sample(shape, f)`; `canonicalShape(history, maxIterations = 4): Shape \| null`; `shapeForecast(series, history, axis, todayIndex, endIndex, maxIterations = 4): ForecastSeries \| NotUsable`; `historicalRate(series): number \| null`; `velocityForecast(series, history, todayIndex, endIndex, maxIterations = 4): ForecastSeries` (`[]` when invalid); `closedExtension(series, axis)`; `type ForecastStrategy = 'closed-extension' \| 'shape' \| 'velocity' \| 'none'`; `selectForecast({state, series, axis, history, today}): {strategy, values}`; `lastForecastValue(f)`; `deviationPercent(f, committedTotal): number \| null`; `forecastHistory(iterations, selected, max = 4)`; `historySeries(iterations): History` |
 | `deviationLabels.ts` | `FORECAST_LABEL_MIN_PERCENT = 1`; `DeviationLabel {kind: 'tolerance' \| 'forecast', text, value}`; `deviationLabels({committedTotal, state, forecast})`; `reservesGutter(labels)`; `placeDeviationLabels({values, toPixel, plotTop, plotBottom, labelHeight}): number[]` (label-centre pixel y, input order) |
 | `annotationGeometry.ts` | `ANNOTATION_LABEL` constants; `annotationLabelSize(text): {width, height}`; `bandsOverlap(a, hA, b, hB)`; `StackItem {date, value, height}`; `StackedItem {index, date, offset}`; `stackAnnotationLabels(items, axis): StackedItem[]`; `horizontalPushSign(axisIndex, axisLength): -1 \| 1` (−1 = leftwards); `verticalPushSign(value, min, max): -1 \| 1` (+1 = upwards) |
 | `predictability.ts` | `PREDICTABILITY_WINDOW = 4`; `COMPLIANT_THRESHOLD = 0.1`; `NO_SCORE` (unique symbol) + `type NoScore`; `PredictabilityScore {averageDeviation (fraction), averageDifference, medianVelocity, compliantShare (percent), analysedCount}`; `closedForScore(iterations, max = 4)`; `predictability(closed): PredictabilityScore \| NoScore`; `presentScore(score): ScorePresentation` (texts, tones, caption, analysed) |
-| `metrics.ts` | `deliveryMetrics(report): {committed, delivered, deviation (percent), difference}`; `presentMetrics(m): {deviationText, deviationTone, diffText, diffTone}`; `deliverySummary(report): {completedPercent, inProgressPercent, completedShare, inProgressShare, completedOf, inProgressOf}` |
+| `metrics.ts` | `deliveryMetrics(report): {committed, delivered, deviation (percent), difference}`; `iterationMetrics(iteration, today): {…, vsIdeal}` (open → vs the burndown Ideal on today; closed → `deliveryMetrics`); `presentMetrics(m): {deviationText, deviationTone, diffText, diffTone}`; `deliverySummary(report): {completedPercent, inProgressPercent, completedShare, inProgressShare, completedOf, inProgressOf}` |
 | `format.ts` | `oneDecimal`; `signedOneDecimal`; `formatPoints`; `formatSignedPoints`; `formatPercentOneDecimal` ("8.8 %"); `formatWholePercent` ("50 %"); `formatShare` ("67%"); `formatDateRange(start, due)` (delegates to `S.dateRange`) |
 | `colorScale.ts` | `type Tone = 'good' \| 'caution' \| 'poor'`; `deviationTone(percent)`; `differenceTone(points)`; `compliantTone(percent)` |
-| `model.ts` | `BurndownModel {series, axis, live, todayIndex, remaining, ideal, forecast, forecastStrategy, committedTotal, tolerance, labels, reserveGutter}`; `buildBurndownModel({iteration, iterations, today})`; `buildBurnupModel(iteration, today): BurnupModel` |
+| `model.ts` | `BurndownModel {series, axis, live, todayIndex, remaining, ideal, forecast, forecastStrategy, committedTotal, tolerance, labels, reserveGutter}`; `buildBurndownModel({iteration, iterations, today})`; `buildBurnupModel({iteration, iterations, today}): BurnupModel` (Amendment B) |
 
 **Wiring the UI should use:** `today = todayUtc()` once per render; `buildBurndownModel` / `buildBurnupModel`
 for the chart; `closedForScore(list)` → if `[]` render `S.scoreNone` without any read, else
@@ -93,17 +93,18 @@ Implementation hints that the tests force:
 | D-21 | tolerance = committedTotal × 10 % | [M] §2.3 | `curve › tolerance = committedTotal × 10 %` |
 | D-22 | committedTotal ≤ 0 → no line (and no labels, D-45) | [M] | `curve › no committed workload → no tolerance line`; `model › no committed workload → …` |
 
-### §7.6 Burnup (KNOWN BEHAVIOUR, ledger #8)
+### Amendment B Burnup (replaces §7.6 and ledger #8; GitLab / Jira burnup)
 
 | # | Rule | Tag | Test |
 |---|---|---|---|
-| D-23 | maxScope = largest committed of any point | [M] | `curve › completed, total scope…`; `realistic data…` |
-| D-24 | Axis = series dates + up to 7 days after the last point that are ≤ due date | [M] | `curve › axis = series dates + up to 7 days…`; `axis extension stops at the due date`; `no extension when…` |
-| D-25 | Completed = delivered at the date, null where no point | [M] | `curve › completed, total scope…` |
-| D-26 | Total scope = constant maxScope | [M] | `curve › completed, total scope…` |
-| D-27 | Ideal **descends** from the first point's remaining (burndown formula), null when span is 0 | [KB] | `curve › ideal DESCENDS…`; `realistic data…`; `a zero span → ideal is null everywhere` |
-| D-28 | Forecast null on/before the last recorded date; then `min(maxScope, lastDelivered + firstCommitted × daysAfterLast)` (saturates) | [KB] | `curve › completed, total scope… per-day forecast slope`; `realistic data: forecast saturates…`; `no projected positions…` |
-| D-29 | Burnup uses the repaired series | [M] | `model › uses the repaired series (today point included) and the 7-day extension` |
+| D-23 | Axis = the burndown axis (first point → due date) | [M] | `curve › axis = the burndown axis…`; `model › shares the burndown axis and forecast…` |
+| D-24 | Completed = delivered at the date, null where no point | [M] | `curve › completed = delivered per date…` |
+| D-25 | Total scope = committed per date; last scope carried forward after the last point; `scopeProjectedFrom` = last point | [M] | `curve › completed = delivered per date; total scope = committed per date…` |
+| D-26 | Ideal (guideline) rises 0 → first committed, exact on the due date; null when the span is 0 | [M] | `curve › ideal (guideline) rises…`; `a zero span → ideal null everywhere` |
+| D-27 | Forecast = Completed[anchor] + open × (1 − max(0,R[i]) / R[anchor]), flat when R[anchor] ≤ 0; joins Completed, never falls, meets Total at R = 0 | [M] | `curve › forecast starts ON today's Completed point…`; `repaired point whose remaining…`; `a negative remaining at the anchor…`; `nulls in the forecast…`; `closed iteration…`; `no forecast…` |
+| D-28 | projectedDone = first R ≤ 0 after the anchor (none if already done); openAtDue = Total − Forecast on the due date, only when the axis ends on it | [M] | `curve › projected completion…`; `never completing…`; `already done at the anchor…`; `open work is only reported ON the due date…`; `burnupReading › caption: nothing without a due date` |
+| D-29 | Burnup uses the burndown pipeline (repaired series, axis, forecast) | [M] | `model › shares the burndown axis and forecast…` |
+| D-29b | Caption and tooltip progress lines | [M] | `burnupReading › …` |
 
 ### §8 Forecasting
 
@@ -174,6 +175,7 @@ Implementation hints that the tests force:
 | D-72 | Compliant % ≥ 70 good · ≥ 50 caution · else poor | [M] A.6 | `colorScale › compliant share…` |
 | D-73 | Median velocity never colour-coded | [M] §11.3 | `predictability › presentation…` (`medianVelocity` has no tone) |
 | D-74 | §12 strip: deviation = committed > 0 ? \|c−d\|/c × 100 : 0; difference = c − d; `Deviation: {x.x}%`, `Diff: {±x.x} pts`; tones | [M] §12 | `metrics › §12 delivery metrics strip` (3 tests) |
+| D-74b | §12 open iteration: difference = remaining today − burndown ideal today, deviation = \|diff\|/committed; closed → final totals; `vsIdeal` flag | [M] §12 | `metrics › §12 open iterations are measured against the burndown Ideal on today` (5 tests) |
 | D-75 | §3.2 summary: % of committed (0 when committed 0), whole-number rounded, one-decimal `… of …` | [M] §3.2, §13 | `metrics › §3.2 delivery summary strip` (3 tests) |
 | D-76 | Points one decimal; difference with `+` when ≥ 0; deviation one decimal %; compliant whole %; dates `start → due` | [M] §13 | `format › §13 number formatting` (6 tests) |
 
@@ -196,7 +198,7 @@ Implementation hints that the tests force:
 7. **History rate with < 2 points** (§8.4 divides by n − 1): returns no rate (discarded), not NaN/Infinity.
 8. **`median([])` = 0** — makes §8.4 with no rates fall into the trend branch, matching "with no history … extended at the current daily direction".
 9. **Closed straight-line extension** (§8.1): the result includes the last point's own value at its index, nulls before it, and is computed in calendar days via `daysBetween`. With the due-date repair the last point usually *is* the last axis position, so the extension is usually a single value.
-10. **Burnup without a due date**: no 7-day extension ("on or before the due date" cannot hold). The `maxScope / daysRemaining` fallback is unreachable (no points ⇒ empty axis) and is not implemented.
+10. *(Obsolete — Amendment B replaced §7.6; the burnup uses the burndown axis.)*
 11. **Deviation-label placement**: positions are label *centres*; ties keep input order (green above orange); clamping happens after the push-down and **can re-create overlap at a bound** (literal order of §9). An alternative "clamp then re-stack upwards" reading gives different pixels.
 12. **Annotation push direction at the exact centre / midpoint**: centre index counts as the left half (pushed right); midpoint value counts as the lower half (offset down).
 13. **Annotation stacking**: single pass over earlier labels in processing order, bands based on the point value + offset (workload units); off-axis items are *absent* from the output (output carries `index` back to the input).
@@ -241,11 +243,7 @@ Commands: `npx vitest run src/domain` → **12 files, 199 tests passed**. `npx t
 | Ideal: null before firstIndex; max(0, r − r/n·k); exactly 0 at end | §7.4 | MATCH | curve.ts:143-151 | Algebraically equal `r(1 − k/n)` (res. #1). Probe r=30,n=11 → last 0. Mutant "literal formula" killed (3.55e-15). |
 | committedTotal = report committed, else first point committed, else 0 | §7.5 | MATCH | curve.ts:164-167; model.ts:68 | Model passes date-sorted copy so "first" = chronological first. |
 | tolerance = committed × 10 %; ≤ 0 → no line | §7.5, §2.3 | MATCH | curve.ts:158, 170-172 | |
-| Burnup maxScope = largest committed | §7.6 | MATCH | curve.ts:225 | |
-| Burnup axis = series dates + up to 7 days after last point that are ≤ due | §7.6 | MATCH | curve.ts:179, 185-194 | Probe: due far → 7 extra days; due 03-05 → only 2. No due date → no extension (res. #10, reasonable). Mutant 8 days killed. |
-| Burnup Completed / Total scope | §7.6 | MATCH | curve.ts:235-236 | |
-| Burnup Ideal DESCENDS (burndown formula), null if span 0 | §7.6, #8 | MATCH | curve.ts:237 | Probe: 10 → 0 descending. |
-| Burnup Forecast: null ≤ last date, min(maxScope, lastDelivered + firstCommitted × calendar days) | §7.6, #8 | MATCH | curve.ts:228-230, 238-240 | Probe saturates at 12 on the first projected day. `maxScope/daysRemaining` fallback unreachable (empty series ⇒ empty series values) — acceptable. |
+| Burnup (all series) | Amendment B | REPLACED | curve.ts `burnup` | The §7.6 audit rows no longer apply; see the Amendment B table above. |
 | dailyDirection: last ≤5, <2 → 0, Σ changes ÷ (count−1), min(0, …) | §8.2 | MATCH | forecast.ts:48-54 | Mutant "no clamp" killed. |
 | shapeOf: filter committed ≠ 0; <2 → none | §8.3 | MATCH | forecast.ts:63-64 | |
 | shapeOf: start/end from UNFILTERED first/last; end ≤ start → none | §8.3 | MATCH | forecast.ts:65-67 | Probe: first point committed 0 at 03-01 still sets start → f = 0.5 for 03-03. Mutant "filtered start" killed. |
@@ -328,7 +326,6 @@ Commands: `npx vitest run src/domain` → **12 files, 199 tests passed**. `npx t
 | Res. #1–#3, #5–#9, #11–#16, #18 | various | MATCH / acceptable | — | None contradicts spec text. |
 | Res. #4 (ledger #10 not reproduced) | §16 #10 | AMBIGUOUS (accepted) | dates.ts | Deliberate change, recorded here; §16 permits it if recorded. |
 | Res. #9 closed extension "includes the last point's own value" | §8.1 | MISMATCH (partly) | forecast.ts:229 | Including the anchor is fine; leaving it UNFLOORED is not — X-1. |
-| Res. #10 burnup without due date | §7.6 | AMBIGUOUS (accepted) | curve.ts:187 | |
 | Res. #17 "Not pinned … would be coloured caution" | §2.3 | Stale doc | colorScale.ts:7-10 | Builder now settles to 9 decimals, so a mean of three 0.1s is coloured GOOD. Code is the better reading; update the resolution text. |
 | Builder: 9-decimal `settle` on tones and compliance | §2.3, §11.2, A.6 | MATCH (judgement) | colorScale.ts:10; predictability.ts:56 | Protects the stated boundaries from float noise. |
 | Should the 1 % orange floor also settle? | §2.3, §9 | **Yes → MISMATCH** | deviationLabels.ts:43-45 | Same kind of inclusive business threshold; without it a forecast mathematically at exactly 1 % is suppressed. Probe: 87 integer committed values c ≤ 1000 (e.g. 29, 57, 58, 69) with forecast end c/100 give pct = 0.9999999999999999 → no label; velocity-produced ends (e.g. r=0.3, v=0.1, k=2, c=10) likewise. — X-2. |

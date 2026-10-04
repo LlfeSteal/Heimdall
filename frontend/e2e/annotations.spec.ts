@@ -162,10 +162,13 @@ test.describe('E-A annotations', () => {
     await page.getByRole('button', { name: 'Burnup' }).click()
     await expect.poll(async () => (await chartSnapshot(page)).title).toBe('Burnup Chart')
     const up = await chartSnapshot(page)
-    expect(up.annotations).toHaveLength(1)
-    expect(up.annotations[0].type).toBe('point')
-    expect(up.annotations[0].backgroundColor).toBe(COLOURS.BLUE) // Information
-    expect(up.annotations[0].content).toBeUndefined()
+    // Annotation markers only (the forecast's completion / open-at-due entries are separate, Amendment B).
+    const markers = up.annotations.filter((a) => a.id.startsWith('marker-'))
+    expect(markers).toHaveLength(1)
+    expect(markers[0].type).toBe('point')
+    expect(markers[0].backgroundColor).toBe(COLOURS.BLUE) // Information
+    expect(markers[0].content).toBeUndefined()
+    expect(JSON.stringify(up.annotations)).not.toContain('Burnup marker check')
   })
 
   test('E-A3 scoping: the same iid in two groups never leaks (alpha vs alpha/team-1, both iid 7)', async ({ page, request }) => {

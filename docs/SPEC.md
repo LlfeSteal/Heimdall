@@ -1,8 +1,8 @@
 # Group Iteration Review — Product & Algorithm Specification
 
-> **READ FIRST — Amendment A (2026-10-01) overrides parts of this document.** See the section
-> "Amendment A — Group selection by ROOT_GROUP" at the very end. Wherever the body below and Amendment A
-> disagree, **Amendment A wins**. Implementation decisions (stack, API contract) are in
+> **READ FIRST — Amendments A (2026-10-01) and B (2026-10-03) override parts of this document.** See the
+> sections "Amendment A — Group selection by ROOT_GROUP" and "Amendment B — Burnup view" at the end.
+> Wherever the body below and an amendment disagree, **the amendment wins**. Implementation decisions (stack, API contract) are in
 > "Implementation notes" after Amendment A.
 
 A complete, self-contained specification of the application, written for someone who must **rebuild the
@@ -162,7 +162,7 @@ Rows for iterations that have not started yet are **never listed** (§5.3).
 | Loading | `Loading data…` |
 | Failure | the error text — most commonly *No burnup data found for this iteration (check permissions or format).* |
 | Chosen, iteration header | the iteration title, `startDate → dueDate`, and its state badge |
-| Chosen, chart | a view switch (`Burndown` / `Burnup`), the delivery summary strip, and the chart |
+| Chosen, chart | a view switch (`Burndown` / `Burnup`); then a centred head — the chart title, the delivery summary strip under it, and the metrics strip (§12) under that; then the chart |
 
 **Delivery summary strip** (shown when the iteration carries a report): a green dot `Completed` with the
 percentage and `{delivered} of {committed}` in points; a blue dot `In Progress` with its percentage and the
@@ -465,6 +465,9 @@ still open on the last day, you are still inside the agreed band". When there is
 all, no line and no deviation labels are drawn anywhere.
 
 ### 7.6 The burnup view
+
+> **REPLACED by Amendment B (the text below was wrong and is kept for reference only).** The burnup view
+> follows the GitLab / Jira burnup charts; see "Amendment B — Burnup view".
 
 The second tab shows the same data as accumulation instead of depletion.
 
@@ -854,8 +857,9 @@ Definitions that must match exactly:
 
 Two layouts are supported; the product uses the compact one everywhere today.
 
-**Compact (in use).** A bordered panel headed `Average over the last 4 sprints` with four right-aligned
-figures: `Average deviation` as a percentage to one decimal · `Delivery diff.` as a signed value to one
+**Compact (in use).** A bordered panel headed `Average over the last 4 sprints` with four KPI tiles (label
+above, figure right below it, tiles separated by hairlines; 2 × 2 when the panel is narrow), placed at the right of the iteration header
+(it wraps under the header, still right-aligned, when the card is narrow): `Average deviation` as a percentage to one decimal · `Delivery diff.` as a signed value to one
 decimal followed by `pts` · `Compliant sprints` as a whole-number percentage · `Median velocity` to one
 decimal followed by `pts`.
 
@@ -877,14 +881,27 @@ discarded.
 
 ## 12. The in-chart delivery metrics strip
 
-Beside the view switch, when the iteration carries a report:
+Centred under the delivery summary strip (itself under the chart title), when the iteration carries a report.
+
+**Closed iteration** — the final totals:
 
 ```
-committed = report committed workload
-delivered = report delivered workload
-deviation = committed > 0 ? |committed − delivered| / committed × 100 : 0
+committed  = report committed workload
+delivered  = report delivered workload
 difference = committed − delivered
+deviation  = committed > 0 ? |difference| / committed × 100 : 0
 ```
+
+**Open iteration** (any state but `closed`; user decision 2026-10-03) — measured against the **burndown Ideal**
+(§7.4) on today's date (UTC), on the repaired series (§7.2) and the burndown axis (§7.3):
+
+```
+difference = remaining today − ideal remaining today      (positive = behind the ideal)
+deviation  = committed > 0 ? |difference| / committed × 100 : 0
+```
+
+followed by a small secondary mention `vs ideal`. If today has no remaining or ideal value on the axis, the
+closed formula applies (no mention). On the due date the ideal remaining is 0, so both formulas agree.
 
 Rendered as `Deviation: {deviation to 1 decimal}%` and `Diff: {signed difference to 1 decimal} pts`, each
 coloured good / caution / poor by the same scales as §11.3. Unlike the score, this strip describes the
@@ -937,8 +954,9 @@ Amendment A.)*
 | View switch | `Burndown`, `Burnup` |
 | Chart titles | `Burndown Chart`, `Burnup Chart` |
 | Legend entries | `Remaining`, `Ideal`, `Forecast`, `Completed`, `Total scope` |
+| Burnup reading *(Amendment B)* | y-axis `Weight (pts)`; markers `Done ≈ {date}`, `{pts} open`; caption `Forecast: all work done by {date}, {n} day(s) before the due date.` / `… on the due date.` / `Forecast: {pts} still open on the due date ({due}).` / closed: `{pts} left open on the due date ({due}).`; tooltip `Remaining: {pts}`, `{n}% complete` |
 | Delivery summary | `Completed`, `In Progress`, `of` |
-| Metrics strip | `Deviation:`, `Diff:` |
+| Metrics strip | `Deviation:`, `Diff:`, `vs ideal` (open iterations) |
 | Score, loading | `Predictability scores...` / `Calculating…` |
 | Score, failure | `Error: {message}` |
 | Score, timeout | `Timeout exceeded (30s)` |
@@ -1098,7 +1116,7 @@ Current, observable behaviour. Reproduce it, or change it deliberately and recor
 | 5 | Replacing a card that already holds children would drop them | only harmless because of the path sort order *(no longer applicable, Amendment A builds cards from the hierarchy)* |
 | 6 | The chooser hides not-yet-started iterations, but auto-selection scans the **unfiltered** list | the pre-selected iteration may not be the top row of the chooser |
 | 7 | Remaining work is never floored at zero | a negative segment can appear if GitLab reports over-completion |
-| 8 | Burnup *Ideal* descends and burnup *Forecast* saturates immediately | both visually wrong on that tab (§7.6) |
+| 8 | Burnup *Ideal* descends and burnup *Forecast* saturates immediately | both visually wrong on that tab (§7.6) *(CHANGED by Amendment B: no longer reproduced)* |
 | 9 | "Today" is the UTC calendar day | the highlighted point can differ from the user's local day |
 | 10 | Axis days are generated with mixed local/UTC conventions | the axis can shift by a day for users far from UTC |
 | 11 | Annotation offsets use workload units, unclamped | crowded iterations push labels off the top |
@@ -1213,6 +1231,70 @@ computed numbers only; colours follow §2.3 exactly.** The colour words in §15.
 So for §15.3: `8.8 %` → **good**, `+2.5 pts` → **caution**, `50 %` → **caution**.
 
 ---
+
+## Amendment B — Burnup view (decided 2026-10-03, replaces §7.6)
+
+The original §7.6 (constant `maxScope`, descending ideal, forecast saturating on the first projected day,
+7-day axis) was wrong and is **not** a reference. The burnup view is modelled on the **GitLab and Jira burnup
+charts**, plus one Heimdall-specific addition: the forecast. Ledger #8 is no longer reproduced.
+
+### B.1 Shared with the burndown
+
+The burnup uses the **same repaired series (§7.2), the same axis (§7.3) and the same forecast (§8)** as the
+burndown of the same iteration. Both tabs therefore tell the same story; only the presentation differs
+(accumulation instead of depletion).
+
+### B.2 Series
+
+```
+firstIndex, totalDays  as §7.3;   last = axis position of the last recorded point
+Completed[i]   = delivered on that date; nothing where there is no point
+Total scope[i] = committed on that date (the real scope, day by day — scope changes are visible);
+                 after `last`, the last point's committed carried forward (projected scope)
+Ideal[i]       = nothing before firstIndex, or everywhere when the span (lastAxisPosition − firstIndex) is 0;
+                 otherwise firstCommitted × (i − firstIndex) / totalDays
+                 — the GitLab / Jira guideline: 0 at the start, the starting scope exactly on the due date
+R              = the §8 burndown forecast (remaining work per position)
+anchor         = first position where R has a value (today on a live iteration, the last point on a closed one)
+open           = max(0, Total scope[anchor] − Completed[anchor])        (the work still to do at the anchor)
+Forecast[i]    = nothing before the anchor; otherwise
+                 Completed[anchor] + open × (1 − max(0, R[i]) / R[anchor])     when R[anchor] > 0
+                 Completed[anchor]                                             when R[anchor] ≤ 0 (done, or over-delivered)
+                 (nothing at all when R is empty, or Completed / Total scope has no value at the anchor)
+```
+
+The forecast **starts on the Completed curve** at the anchor — the join between work done and work remaining —
+and burns the open work at the pace of the burndown forecast. It never falls, and it meets the Total line
+exactly where the forecast remaining reaches zero — even when the anchor is a §7.2 repair point whose remaining
+is the in-progress total rather than committed − delivered.
+
+```
+projected completion = first position after the anchor where R ≤ 0     (none when R[anchor] ≤ 0 or open = 0)
+open at due date     = Total scope − Forecast on the due date, when there is no projected completion, the axis
+                       ends on the due date, and the result is > 0     (else none)
+```
+
+The caption and the open-at-due bracket refer to the iteration's **due date**; without a due date (or when the
+axis does not end on it) neither is shown.
+
+### B.3 Appearance
+
+| Element | Appearance |
+|---|---|
+| **Completed** | green, solid, filled beneath, monotone curve (never overshoots a recorded value), visible dots; today's dot red on a live iteration |
+| **Total scope** | secondary neutral, solid 2 px over the recorded days, finely dashed where it is only carried forward |
+| Remaining work | the band between Total scope and Completed, shaded in the burndown's Remaining blue (no legend entry) |
+| **Ideal** | gray, thin dashed, no dots |
+| **Forecast** | orange, dashed, no dots |
+| Projected completion | an orange dot where the forecast meets Total, labelled `Done ≈ {date}` |
+| Open at due date | an orange vertical bracket on the due date from the forecast's end to Total, labelled `{pts} open` |
+| Caption | one line above the chart (orange dot): the completion date and days before the due date, or the points still open on the due date (factual wording for a closed iteration); none without a forecast. Also part of the chart's accessible name. |
+| Tooltip | per date: each series in points, then `Remaining: {pts}` (Total − Completed) and `{n}% complete`, then the annotation texts |
+| Axes | y from 0, titled `Weight (pts)`, with headroom for the labels; x with half a day of margin at both ends so the due-date bracket is never clipped |
+
+Legend entries stay `Completed`, `Total scope`, `Ideal`, `Forecast`. There is no tolerance line and no
+deviation gutter on the burnup. Annotations are dots on the Completed value in their type colour (no text, no
+callout); a point click opens the annotation dialogue only where Completed has a value.
 
 ## Implementation notes (orchestrator decisions, not product behaviour)
 

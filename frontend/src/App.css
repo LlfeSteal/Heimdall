@@ -338,12 +338,18 @@ button.plain:hover:not(:disabled), button.link-button:hover:not(:disabled) { bac
 
 .centre { min-width: 0; }
 .chart-card { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px; }
+.chart-card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px 24px; }
+.chart-card-head .score-panel { flex: 0 1 500px; margin-left: auto; }
 .iteration-header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .iteration-header .muted { font-size: 12px; font-variant-numeric: tabular-nums; }
 .chart-state { padding: 12px 0; }
 .chart-state > .muted { font-size: 13px; }
 .chart-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
-.metrics-strip { display: flex; gap: 16px; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.chart-head { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.chart-title { margin: 0; font-size: 13px; font-weight: 600; color: var(--text); }
+.chart-head .delivery-summary, .chart-head .metrics-strip { justify-content: center; }
+.metric-ref { align-self: center; font-size: 12px; font-weight: 400; }
+.metrics-strip { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .delivery-summary { display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 13px; }
 .summary-item { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
 .summary-item .muted { font-size: 12px; }
@@ -351,8 +357,11 @@ button.plain:hover:not(:disabled), button.link-button:hover:not(:disabled) { bac
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
 .dot[data-series='delivered'] { background: var(--delivered); }
 .dot[data-series='in-progress'] { background: var(--remaining); }
+.dot[data-series='forecast'] { background: var(--forecast); }
 
 .chart-canvas { position: relative; height: 380px; min-width: 0; }
+/* Amendment B: one-line forecast reading above the burnup chart. */
+.chart-caption { display: flex; align-items: center; justify-content: center; gap: 6px; margin: 0; font-size: 13px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) { .chart-canvas { height: 300px; } }
 
 /* §9 gutter beside the plot: overlays the reserved right padding of the canvas. */
@@ -387,19 +396,34 @@ button.plain:hover:not(:disabled), button.link-button:hover:not(:disabled) { bac
 .deviation-label[data-kind='forecast'] { color: var(--forecast-text); background: color-mix(in srgb, var(--forecast) 12%, var(--card)); }
 
 /* ---------- Score panel (§11.3): an inset on --fill ---------- */
-.score-panel { padding: 12px; border-radius: 8px; background: var(--fill); }
+.score-panel { padding: 12px; border-radius: 8px; background: var(--fill); container-type: inline-size; }
 /* Error / timeout: the error recipe (red 10 % mixed into the card), status text in --text. */
 .score-panel:has(.score-status[data-tone='poor']) { background: color-mix(in srgb, var(--red) 10%, var(--card)); }
 .score-heading {
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
 }
-.score-rows { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 4px 16px; margin: 0; }
-.score-rows > div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+/* §11.3 compact: KPI tiles — label above, figure right below, hairlines between tiles; 2 × 2 when narrow. */
+.score-rows { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 10px; margin: 0; }
+.score-rows > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 12px;
+  border-left: 1px solid var(--separator);
+}
+.score-rows > div:nth-child(odd) { padding-left: 0; border-left: 0; }
+@container (min-width: 440px) {
+  .score-rows { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .score-rows > div:nth-child(odd) { padding-left: 12px; border-left: 1px solid var(--separator); }
+  .score-rows > div:first-child { padding-left: 0; border-left: 0; }
+}
 .score-rows dt { font-size: 12px; color: var(--text-secondary); }
-.score-rows dd { margin: 0; text-align: right; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.score-rows dd { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .score-status { font-size: 12px; color: var(--text-secondary); }
 .score-status[data-tone='poor'] { color: var(--text); }
 .score-expanded-head { display: flex; align-items: baseline; gap: 8px; }

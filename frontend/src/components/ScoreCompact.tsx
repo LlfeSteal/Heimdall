@@ -1,4 +1,4 @@
-// §11.3 compact score layout (the one in use).
+// §11.3 compact score layout (the one in use): KPI tiles — label above, figure below.
 import type { ScorePresentation } from '../domain/predictability'
 import { S } from '../strings'
 

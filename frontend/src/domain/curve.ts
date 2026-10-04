@@ -1,6 +1,6 @@
-// Building the curve: completeness repairs, axis, burndown series, tolerance, burnup (SPEC §7).
+// Building the curve: completeness repairs, axis, burndown series, tolerance (SPEC §7), burnup (Amendment B).
 import type { IterationState, Report, SeriesPoint } from '../api/types'
-import { addDays, daysBetween, type IsoDate } from './dates'
+import { addDays, type IsoDate } from './dates'
 import { isClosed } from './state'
 
 /** A chart value at one axis position; `null` = "nothing here" (a gap; never interpolated). */
@@ -37,11 +37,6 @@ function pointsByDate(series: SeriesPoint[]): Map<IsoDate, SeriesPoint> {
   const byDate = new Map<IsoDate, SeriesPoint>()
   for (const p of series) if (!byDate.has(p.date)) byDate.set(p.date, p)
   return byDate
-}
-
-/** Distinct series dates, ascending. */
-function distinctDates(series: SeriesPoint[]): IsoDate[] {
-  return [...new Set(series.map((p) => p.date))].sort()
 }
 
 /**
@@ -172,71 +167,116 @@ export function toleranceLevel(committedTotal: number): number | null {
 }
 
 // ---------------------------------------------------------------------------------------------------
-// §7.6 Burnup (KNOWN BEHAVIOUR formulas reproduced on purpose, ledger #8)
+// Amendment B — Burnup view (replaces §7.6; modelled on the GitLab / Jira burnup charts)
 // ---------------------------------------------------------------------------------------------------
 
-/** §7.6 the burnup axis extends at most this many days after the last point. */
-export const BURNUP_EXTENSION_DAYS = 7
-
-/**
- * §7.6 burnup axis = distinct series dates sorted ascending, plus each of the 7 calendar days after the
- * last (latest) point that is on or before `dueDate`. No due date → no extension.
- */
-export function buildBurnupAxis(series: SeriesPoint[], dueDate: IsoDate | null): IsoDate[] {
-  const axis = distinctDates(series)
-  if (dueDate === null || series.length === 0) return axis
-  const last = latestDate(series)
-  for (let k = 1; k <= BURNUP_EXTENSION_DAYS; k++) {
-    const d = addDays(last, k)
-    if (d <= dueDate) axis.push(d)
-  }
-  return axis
-}
-
 export interface BurnupModel {
+  /** The burndown axis (`buildAxis`): first point → due date, so both tabs share positions. */
   axis: IsoDate[]
-  /** Largest committed workload of any point (0 for an empty series). */
-  maxScope: number
+  /** The iteration's due date (null when it has none). */
+  dueDate: IsoDate | null
   /** delivered at that date; null where there is no point. */
   completed: Value[]
-  /** constant maxScope at every axis position. */
-  totalScope: number[]
   /**
-   * KNOWN BEHAVIOUR (descends): null before firstIndex, and null everywhere when the span
-   * (lastAxisPosition − firstIndex) is 0; otherwise the §7.4 burndown ideal formula on the burnup axis
-   * (firstRemaining = remaining of the first point).
+   * committed at that date (the real scope, day by day); after the last recorded point, the last point's
+   * committed carried forward (projected scope); null on a position with no point before it.
+   */
+  totalScope: Value[]
+  /** Axis position of the last recorded point (the scope line is dashed after it); −1 when there is none. */
+  scopeProjectedFrom: number
+  /**
+   * Guideline: null before firstIndex and everywhere when the span is 0; otherwise rises linearly from 0 at
+   * firstIndex to the first point's committed workload, reached exactly on the last axis position.
    */
   ideal: Value[]
   /**
-   * KNOWN BEHAVIOUR (saturates): null on or before the last recorded date; afterwards
-   * `min(maxScope, lastDelivered + slope × daysAfterLast)` with slope = FIRST point's committed workload
-   * PER DAY and daysAfterLast in calendar days. (The `maxScope / daysRemaining` fallback for "no first
-   * point" is unreachable: no points ⇒ empty axis.)
+   * The burndown forecast mirrored: with anchor = first position holding a forecast value R and
+   * open = max(0, totalScope[anchor] − completed[anchor]): completed[anchor] + open × (1 − max(0, R[i]) / R[anchor])
+   * from the anchor on (null before; flat at completed[anchor] when R[anchor] ≤ 0). Joins Completed at the
+   * anchor, never falls, meets Total where R reaches 0. All null when there is no forecast, or no Completed /
+   * Total value at the anchor.
    */
   forecast: Value[]
+  /** First position after the anchor where the forecast remaining reaches 0 (projected completion); else null. */
+  projectedDone: { index: number; date: IsoDate } | null
+  /**
+   * Total − Forecast on the due date when the forecast never completes and the axis ends on the due date;
+   * else null.
+   */
+  openAtDue: number | null
+  /** Today's position on a live iteration (red dot, as on the burndown); −1 otherwise. */
+  todayIndex: number
 }
 
-/** §7.6 all burnup series for an (already repaired) series. Pure; does not mutate input. */
-export function burnup(series: SeriesPoint[], dueDate: IsoDate | null): BurnupModel {
-  const axis = buildBurnupAxis(series, dueDate)
-  if (series.length === 0) return { axis, maxScope: 0, completed: [], totalScope: [], ideal: [], forecast: [] }
-
+/**
+ * Amendment B: all burnup series for an (already repaired, date-sorted) series on the burndown `axis`, with the
+ * burndown forecast `forecastRemaining` (remaining work per position, §8). Pure; does not mutate input.
+ */
+export function burnup(
+  series: SeriesPoint[],
+  axis: IsoDate[],
+  forecastRemaining: Value[],
+  todayIndex: number,
+  dueDate: IsoDate | null,
+): BurnupModel {
   const byDate = pointsByDate(series)
-  const maxScope = Math.max(...series.map((p) => p.committed))
-  const { firstIndex } = axisMetrics(axis, series)
-  const span = axis.length - 1 - firstIndex
-  const lastDate = latestDate(series)
-  const lastDelivered = byDate.get(lastDate)!.delivered
-  const slope = series[0].committed // KNOWN BEHAVIOUR: a whole committed workload per day
+  const completed = axis.map((d) => byDate.get(d)?.delivered ?? null)
+  const scopeProjectedFrom = series.length === 0 ? -1 : axis.indexOf(latestDate(series))
+  const lastScope = scopeProjectedFrom < 0 ? null : byDate.get(axis[scopeProjectedFrom])!.committed
+  const totalScope = axis.map((d, i) =>
+    scopeProjectedFrom >= 0 && i > scopeProjectedFrom ? lastScope : (byDate.get(d)?.committed ?? null),
+  )
 
-  return {
-    axis,
-    maxScope,
-    completed: axis.map((d) => byDate.get(d)?.delivered ?? null),
-    totalScope: axis.map(() => maxScope),
-    ideal: firstIndex < 0 || span <= 0 ? axis.map(() => null) : idealSeries(series, axis),
-    forecast: axis.map((d) =>
-      d <= lastDate ? null : Math.min(maxScope, lastDelivered + slope * daysBetween(lastDate, d)),
-    ),
+  const { firstIndex, totalDays } = axisMetrics(axis, series)
+  const span = axis.length - 1 - firstIndex
+  const firstCommitted = firstIndex < 0 ? 0 : byDate.get(axis[firstIndex])!.committed
+  // c × k/n is exactly c at k = n.
+  const ideal = axis.map((_, pos) =>
+    firstIndex < 0 || span <= 0 || pos < firstIndex ? null : (firstCommitted * (pos - firstIndex)) / totalDays,
+  )
+
+  const empty = { forecast: axis.map(() => null), projectedDone: null, openAtDue: null }
+  const anchor = forecastRemaining.findIndex((v) => v !== null)
+  const anchorCompleted = anchor < 0 ? null : (completed[anchor] ?? null)
+  const anchorScope = anchor < 0 ? null : (totalScope[anchor] ?? null)
+  const dueIndex = dueDate === null ? -1 : axis.indexOf(dueDate)
+  const projection =
+    anchor < 0 || anchorCompleted === null || anchorScope === null
+      ? empty
+      : project(forecastRemaining, axis, anchor, anchorCompleted, anchorScope, dueIndex)
+
+  return { axis, dueDate, completed, totalScope, scopeProjectedFrom, ideal, ...projection, todayIndex }
+}
+
+function project(
+  r: Value[],
+  axis: IsoDate[],
+  anchor: number,
+  anchorCompleted: number,
+  anchorScope: number,
+  dueIndex: number,
+) {
+  const start = r[anchor]!
+  // The open work at the anchor (Total − Completed) is burnt at the pace of the burndown forecast, so the
+  // forecast joins Completed at the anchor and meets Total exactly when R reaches 0 — even on a repaired point
+  // whose remaining is the in-progress total rather than committed − delivered. Nothing to burn (R ≤ 0,
+  // including a negative remaining, §7.1) → flat at Completed.
+  const open = Math.max(0, anchorScope - anchorCompleted)
+  const burnt = (v: number) => (start > 0 ? open * (1 - Math.max(0, v) / start) : 0)
+  const forecast = axis.map((_, i) => {
+    const v = r[i]
+    return i < anchor || v === null || v === undefined ? null : anchorCompleted + burnt(v)
+  })
+  let projectedDone: BurnupModel['projectedDone'] = null
+  if (start > 0 && open > 0) {
+    const index = r.findIndex((v, i) => i > anchor && v !== null && v <= 0)
+    if (index >= 0) projectedDone = { index, date: axis[index] }
   }
+  // Open on the due date: only when the axis really ends on the due date and the forecast reaches it.
+  const atDue = dueIndex >= 0 && dueIndex === axis.length - 1 ? forecast[dueIndex] : null
+  const openAtDue =
+    projectedDone === null && atDue !== null && atDue !== undefined && anchorCompleted + open - atDue > 0
+      ? anchorCompleted + open - atDue
+      : null
+  return { forecast, projectedDone, openAtDue }
 }

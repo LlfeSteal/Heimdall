@@ -1,8 +1,9 @@
 // The chart theme: token values read from <html> at runtime, re-read when the appearance changes.
 import { renderHook, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { Chart } from 'chart.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { installTokens } from '../test/tokens'
-import { readChartTheme, tint, useChartTheme } from './chartSetup'
+import { DASH, legendStyle, readChartTheme, tint, useChartTheme } from './chartSetup'
 
 let uninstall: (() => void) | null = null
 /** Token values without whitespace (engines differ in how they serialise rgba()). */
@@ -78,5 +79,26 @@ describe('chart theme', () => {
     expect(tint('rgba(60, 60, 67, 0.6)', 0.5)).toBe('rgba(60, 60, 67, 0.3)')
     expect(tint('rgba(60,60,67,0.6)', 0.5)).toBe('rgba(60, 60, 67, 0.3)')
     expect(tint('rgb(52, 199, 89)', 0.14)).toBe('rgba(52, 199, 89, 0.14)')
+  })
+})
+
+describe('legend swatches', () => {
+  it('dashed or line-styled series get a line swatch; filled series (Remaining, Completed) keep a box', () => {
+    const datasets = [
+      { label: 'Completed', fill: 'origin', pointStyle: 'circle' }, // burnup / burndown filled series
+      { label: 'Total scope', pointStyle: 'line' }, // solid line (burnup, Amendment B)
+      { label: 'Ideal', pointStyle: 'line', borderDash: DASH },
+    ]
+    const spy = vi
+      .spyOn(Chart.defaults.plugins.legend.labels, 'generateLabels')
+      .mockReturnValue(datasets.map((d, i) => ({ text: d.label, datasetIndex: i }) as never))
+    try {
+      const chart = { data: { datasets } } as unknown as Chart
+      const items = legendStyle(readChartTheme()).labels.generateLabels(chart)
+      expect(items.map((i) => i.pointStyle)).toEqual(['rectRounded', 'line', 'line'])
+      expect(items.map((i) => i.lineDash)).toEqual([[], [], DASH])
+    } finally {
+      spy.mockRestore()
+    }
   })
 })

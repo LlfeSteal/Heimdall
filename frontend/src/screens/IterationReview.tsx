@@ -141,12 +141,15 @@ interface ChartCardProps {
 function ChartCard({ selected, reports, scorePanel, view, onView, ann }: ChartCardProps) {
   return (
     <section className="chart-card" data-testid="chart-card">
-      <div className="iteration-header">
-        <h2>{selected.title}</h2>
-        <span className="muted">{S.dateRange(selected.startDate, selected.dueDate)}</span>
-        <StateBadge state={selected.state} />
+      {/* Iteration header on the left, the score panel at its right (wraps under it, still right-aligned). */}
+      <div className="chart-card-head">
+        <div className="iteration-header">
+          <h2>{selected.title}</h2>
+          <span className="muted">{S.dateRange(selected.startDate, selected.dueDate)}</span>
+          <StateBadge state={selected.state} />
+        </div>
+        {scorePanel}
       </div>
-      {scorePanel}
       <ChartBody selected={selected} reports={reports} view={view} onView={onView} ann={ann} />
       {ann.dialogue && (
         <AnnotationDialog
@@ -190,9 +193,13 @@ function ChartBody({ selected, reports, view, onView, ann }: Omit<ChartCardProps
             {S.viewBurnup}
           </button>
         </div>
-        <MetricsStrip report={it.report} />
       </div>
-      <DeliverySummary report={it.report} />
+      {/* Centred head: chart title, then Completed / In Progress, then Deviation / Diff. */}
+      <div className="chart-head" data-testid="chart-head">
+        <h3 className="chart-title">{view === 'burndown' ? S.burndownTitle : S.burnupTitle}</h3>
+        <DeliverySummary report={it.report} />
+        <MetricsStrip iteration={{ ...it, report: it.report }} />
+      </div>
       {view === 'burndown' ? (
         <BurndownChart
           iteration={it}
@@ -201,7 +208,12 @@ function ChartBody({ selected, reports, view, onView, ann }: Omit<ChartCardProps
           onPointClick={ann.clickPoint}
         />
       ) : (
-        <BurnupChart iteration={it} annotations={ann.annotations} onPointClick={ann.clickPoint} />
+        <BurnupChart
+          iteration={it}
+          reports={reports.data}
+          annotations={ann.annotations}
+          onPointClick={ann.clickPoint}
+        />
       )}
     </>
   )

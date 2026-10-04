@@ -156,7 +156,7 @@ function burndownOptions(
     },
     onClick: pointClickHandler(m.axis, m.remaining, onPointClick),
     plugins: {
-      title: titleStyle(t, S.burndownTitle),
+      title: titleStyle(t, S.burndownTitle, false), // shown as the HTML heading of the chart head
       legend: legendStyle(t),
       tooltip: {
         ...tooltipStyle(t),
