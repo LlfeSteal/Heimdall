@@ -1,0 +1,20 @@
+Heimdall {{ .Chart.AppVersion }} is deployed{{ if .Values.config.mock }} with FIXTURE DATA (config.mock=true){{ end }}.
+ROOT_GROUP: {{ .Values.config.rootGroup }}
+{{- if not .Values.config.mock }}
+GitLab:     {{ .Values.gitlab.url }}{{ if not (include "heimdall.tokenSecretName" .) }}  (no token configured: only public data is visible){{ end }}
+{{- end }}
+{{ if .Values.ingress.enabled }}
+Open:
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ (first .paths).path }}
+{{- end }}
+{{- else if eq .Values.frontend.service.type "LoadBalancer" }}
+Get the address (may take a minute):
+  kubectl get svc -n {{ .Release.Namespace }} {{ include "heimdall.frontend.fullname" . }} -o jsonpath='{.status.loadBalancer.ingress[0]}'
+{{- else }}
+Reach the UI locally:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/{{ include "heimdall.frontend.fullname" . }} 8090:{{ .Values.frontend.service.port }}
+  open http://localhost:8090/
+{{- end }}
+
+Check it: helm test -n {{ .Release.Namespace }} {{ .Release.Name }}

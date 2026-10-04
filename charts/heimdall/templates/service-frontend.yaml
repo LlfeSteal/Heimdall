@@ -1,0 +1,23 @@
+{{- $svc := .Values.frontend.service }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "heimdall.frontend.fullname" . }}
+  labels:
+    {{- include "heimdall.componentLabels" (dict "ctx" . "component" "frontend") | nindent 4 }}
+  {{- with $svc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $svc.type }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: http
+      protocol: TCP
+      {{- if and (has $svc.type (list "NodePort" "LoadBalancer")) $svc.nodePort }}
+      nodePort: {{ $svc.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "heimdall.componentSelectorLabels" (dict "ctx" . "component" "frontend") | nindent 4 }}

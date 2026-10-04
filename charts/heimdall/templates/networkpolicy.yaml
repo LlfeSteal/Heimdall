@@ -1,0 +1,46 @@
+{{- if .Values.networkPolicy.enabled }}
+# Backend: reachable only from the frontend pods on its HTTP port.
+# Egress is left open: the backend must reach GitLab (and DNS).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "heimdall.backend.fullname" . }}
+  labels:
+    {{- include "heimdall.componentLabels" (dict "ctx" . "component" "backend") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "heimdall.componentSelectorLabels" (dict "ctx" . "component" "backend") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "heimdall.componentSelectorLabels" (dict "ctx" . "component" "frontend") | nindent 14 }}
+      ports:
+        - port: http
+          protocol: TCP
+---
+# Frontend: HTTP port only, from frontendIngressFrom peers (anywhere when empty).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "heimdall.frontend.fullname" . }}
+  labels:
+    {{- include "heimdall.componentLabels" (dict "ctx" . "component" "frontend") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "heimdall.componentSelectorLabels" (dict "ctx" . "component" "frontend") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: http
+          protocol: TCP
+      {{- with .Values.networkPolicy.frontendIngressFrom }}
+      from:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

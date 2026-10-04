@@ -66,6 +66,22 @@ docker compose down
 
 Variables exported in the shell override `.env`.
 
+## Kubernetes (Helm)
+
+[`charts/heimdall`](charts/heimdall) deploys the same two components (backend Deployment + nginx frontend
+Deployment, optional Ingress). The chart has no default registry: push both images to yours, then:
+
+```sh
+helm upgrade --install heimdall charts/heimdall -n heimdall --create-namespace \
+  --set config.rootGroup=my-org/delivery \
+  --set gitlab.url=https://gitlab.example.com --set gitlab.existingSecret=heimdall-gitlab \
+  --set backend.image.registry=registry.example.com/heimdall \
+  --set frontend.image.registry=registry.example.com/heimdall
+```
+
+Values (token Secret, private GitLab CA, Ingress/TLS, autoscaling, network policy…) are documented in
+[`charts/heimdall/README.md`](charts/heimdall/README.md).
+
 ## Conformance docs
 
 The implementation was built by several agents, each owning one area and checking it against the spec.

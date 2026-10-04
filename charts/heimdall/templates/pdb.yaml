@@ -1,0 +1,21 @@
+{{- range $component := list "backend" "frontend" }}
+{{- $c := index $.Values $component }}
+{{- if $c.pdb.enabled }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ printf "%s-%s" (include "heimdall.fullname" $) $component }}
+  labels:
+    {{- include "heimdall.componentLabels" (dict "ctx" $ "component" $component) | nindent 4 }}
+spec:
+  {{- if $c.pdb.minAvailable }}
+  minAvailable: {{ $c.pdb.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ $c.pdb.maxUnavailable | default 1 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "heimdall.componentSelectorLabels" (dict "ctx" $ "component" $component) | nindent 6 }}
+{{- end }}
+{{- end }}

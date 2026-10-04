@@ -1,0 +1,39 @@
+# `helm test <release>`: the SPA shell and the API (through the nginx proxy) both answer.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ printf "%s-test" (include "heimdall.fullname" .) }}
+  labels:
+    {{- include "heimdall.componentLabels" (dict "ctx" . "component" "test") | nindent 4 }}
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  {{- with .Values.imagePullSecrets }}
+  imagePullSecrets:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  containers:
+    - name: wget
+      image: busybox:1.36
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      command: ["sh", "-c"]
+      args:
+        - >-
+          set -e;
+          url=http://{{ include "heimdall.frontend.fullname" . }}:{{ .Values.frontend.service.port }};
+          wget -q -O /dev/null "$url/";
+          wget -q -O - "$url/api/health" | grep -q '"ok"';
+          echo OK
