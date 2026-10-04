@@ -92,3 +92,9 @@ Their checklists map SPEC sections to the tests that cover them:
 | [`docs/conformance/backend.md`](docs/conformance/backend.md) | Amendment A, GitLab access, caching, HTTP contract, error messages |
 | [`docs/conformance/domain.md`](docs/conformance/domain.md) | Pure TS algorithms in `frontend/src/domain/` (series, forecast, score, formatting) |
 | [`docs/conformance/annotations.md`](docs/conformance/annotations.md) | Annotation model, storage and lifecycle in `frontend/src/annotations/` |
+
+## License
+
+Heimdall is licensed under the [Apache License 2.0](LICENSE). You may use, modify and redistribute it,
+including in commercial products, provided you keep the copyright and license notices, state the changes
+you made, and include the [`NOTICE`](NOTICE) file.
